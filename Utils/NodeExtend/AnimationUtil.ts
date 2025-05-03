@@ -7,9 +7,9 @@ export class AnimationUtil extends Component {
     onTriggerEvent: Function = null!;
 
     triggerEvent(event: string) {
-        console.log(`triggerEvent: node: ${this.node.name}, event: ${event}`);
+        // console.log(`triggerEvent: ${event}`);
         if (this.onTriggerEvent) {
-            this.onTriggerEvent(this.node, event);
+            this.onTriggerEvent(event);
         }
     }
 }
