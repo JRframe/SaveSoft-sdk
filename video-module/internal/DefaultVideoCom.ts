@@ -70,12 +70,10 @@ export class DefaultVideoCom extends VideoCom {
             })
         }
         else{
-            this.mVideoPlayer.playOnAwake = true;
             this.mVideoPlayer.remoteURL = param.src;
         }
 
         this.mVideoPlayer.loop = param.loop;
-
         
     }
 
