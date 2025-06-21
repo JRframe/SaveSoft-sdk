@@ -9,7 +9,7 @@ import { UITransform } from 'cc';
 import { Vec3 } from 'cc';
 import { oops } from 'db://oops-framework/core/Oops';
 import { VideoClip } from 'cc';
-import { EventType, MediaVideo } from '../../mediaVideo/mediaVideo';
+import { EventType, getEventName, MediaVideo } from '../../mediaVideo/mediaVideo';
 import { UIMainVideoComp } from '../../../game/UIMainVideo/UIMainVideoComp';
 import { EventHandler } from 'cc';
 import { UIOpacity } from 'cc';
@@ -63,13 +63,15 @@ export class NativeVideoCom extends VideoCom {
     }
 
     onEventHandler(event: EventHandler, eventType: EventType){
-        console.log(`[video] NativeVideoCom onEventHandle, eventType:${eventType}. 透明度:${this.uiOpacity.opacity}`);
+        console.log(`[video] NativeVideoCom onEventHandle, eventType:${getEventName(eventType)}. 透明度:${this.uiOpacity.opacity}`);
         switch(eventType){
             case EventType.PREPARING:
-                console.log("[video]画布宽度:", cc.winSize.width);
-                console.log("[video]画布高度:", cc.winSize.height);
-                this.videoTransform.width = cc.winSize.width;
-                this.videoTransform.height = cc.winSize.height;
+                break;
+            case EventType.LOADED:
+                if (this.uiOpacity.opacity == 0) {
+                    this.uiOpacity.opacity = 255;
+                    UIMainVideoComp.getInstance().fadeinVideo();
+                }
                 this.mediaVideo.play();
                 break;
             case EventType.STOPPED:
@@ -77,14 +79,15 @@ export class NativeVideoCom extends VideoCom {
                 this.onStopped();
                 break;
             case EventType.PLAYING:
-                UIMainVideoComp.getInstance().fadeinVideo();
-                this.uiOpacity.opacity = 255;
                 break;
         }
     }
 
     tryInit(){
         if(this.isInited) return;
+        console.log(`[video]画布宽度: ${cc.winSize.width}, 画布高度: ${cc.winSize.height}`);
+        this.videoTransform.width = cc.winSize.width;
+        this.videoTransform.height = cc.winSize.height;
         this.mediaVideo.node.active = true;
         this.mVideoPlayer.node.active = true;
         this.isInited = true;

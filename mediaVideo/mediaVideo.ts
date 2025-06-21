@@ -12,7 +12,8 @@ export enum EventType {     //事件类型
     STOPPED = 8,        //停止
     BUFFER_START = 9,       //
     BUFFER_UPDATE = 10,
-    BUFFER_END = 11
+    BUFFER_END = 11,
+    INIT = 12
 };
 
 enum VideoState {       //视频状态
@@ -45,6 +46,45 @@ enum PixelFormat {  //像素格式
 
 const regions: gfx.BufferTextureCopy[] = [new gfx.BufferTextureCopy()];
 const buffers: ArrayBufferView[] = [];
+
+
+/**
+ * 根据事件类型获取事件名称字符串
+ * @param eventType 事件类型
+ * @returns 事件名称字符串
+ */
+export function getEventName(eventType: EventType): string {
+    switch (eventType) {
+        case EventType.PREPARING:
+            return 'preparing';
+        case EventType.LOADED:
+            return 'loaded';
+        case EventType.READY:
+            return 'ready';
+        case EventType.COMPLETED:
+            return 'completed';
+        case EventType.ERROR:
+            return 'error';
+        case EventType.PLAYING:
+            return 'playing';
+        case EventType.PAUSED:
+            return 'paused';
+        case EventType.STOPPED:
+            return 'stopped';
+        case EventType.BUFFER_START:
+            return 'buffer_start';
+        case EventType.BUFFER_UPDATE:
+            return 'buffer_update';
+        case EventType.BUFFER_END:
+            return 'buffer_end';
+        case EventType.INIT: // EventType没有INIT，去除此项以避免报错
+            return 'init';
+        default:
+            return 'unknown';
+    }
+}
+   
+
 @ccclass('MediaVideo')
 export class MediaVideo extends Component {
 
@@ -214,12 +254,12 @@ export class MediaVideo extends Component {
     }
 
     public tryInitializeRemote(source: string) {
-        if(!this._isInitialize){
-            this.clip = null!;
-            this._source = source;
-            this._initialize();
-            this._isInitialize = true;
-        }
+        if(this._isInitialize) return;
+        console.log(`[video] initializeRemote, ${source}`);
+        this.clip = null!;
+        this._source = source;
+        this._initialize();
+        this._isInitialize = true;
     }
 
     /**
@@ -317,7 +357,7 @@ export class MediaVideo extends Component {
             url = loader.md5Pipe.transformURL(url);
         }
 
-        console.log('_updateVideoSource', url);
+        console.log(`[video]_updateVideoSource, ${url}`);
         if (JSB) {
             this._video.stop();
             this._video.setURL(url, this.cache);
@@ -680,6 +720,9 @@ export class MediaVideo extends Component {
     public setRemoteSource(source: string) {
         this.clip = null!;
         this._source = source;
+        if (this._currentState == VideoState.PLAYING) {
+            this.stop();
+        }
         this._updateVideoSource();
     }
 }
