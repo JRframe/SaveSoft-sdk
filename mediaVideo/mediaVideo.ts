@@ -125,7 +125,12 @@ export class MediaVideo extends Component {
     // video event handler for editor
     @property([EventHandler])
     public videoPlayerEvent: EventHandler[] = [];
-    
+
+    @property(Number)
+    width: number = 1080;
+
+    @property(Number)
+    height: number = 1920;
 
     // current position of the video which is playing
     get currentTime() {
@@ -168,29 +173,29 @@ export class MediaVideo extends Component {
         return this._nativeDuration;
     }
     
-    get width(): number {
-        if (!this._isInPlaybackState()) return 0;
-        if (this._nativeWidth > 0) return this._nativeWidth;
-        if (JSB) {
-            this._nativeWidth = this._video.width();
-        } else {
-            let width = this._video.videoWidth;
-            this._nativeWidth = isNaN(width) ? 0 : width;
-        }
-        return this._nativeWidth;
-    }
+    // get width(): number {
+    //     if (!this._isInPlaybackState()) return 0;
+    //     if (this._nativeWidth > 0) return this._nativeWidth;
+    //     if (JSB) {
+    //         this._nativeWidth = this._video.width();
+    //     } else {
+    //         let width = this._video.videoWidth;
+    //         this._nativeWidth = isNaN(width) ? 0 : width;
+    //     }
+    //     return this._nativeWidth;
+    // }
     
-    get height(): number {
-        if (!this._isInPlaybackState()) return 0;
-        if (this._nativeHeight > 0) return this._nativeHeight;
-        if (JSB) {
-            this._nativeHeight = this._video.height();
-        } else {
-            let height = this._video.videoHeight;
-            this._nativeHeight = isNaN(height) ? 0 : height;
-        }
-        return this._nativeHeight;
-    }
+    // get height(): number {
+    //     if (!this._isInPlaybackState()) return 0;
+    //     if (this._nativeHeight > 0) return this._nativeHeight;
+    //     if (JSB) {
+    //         this._nativeHeight = this._video.height();
+    //     } else {
+    //         let height = this._video.videoHeight;
+    //         this._nativeHeight = isNaN(height) ? 0 : height;
+    //     }
+    //     return this._nativeHeight;
+    // }
     
     // not accurate because native event is async, larger than actual percentage.
     get bufferPercentage(): number {
@@ -636,7 +641,7 @@ export class MediaVideo extends Component {
      * @param volume 音量 0-1
      * @returns 
      */
-    public setVolume(volume) {
+    public setVolume(volume: number) {
         if (!this._isInPlaybackState()) {
             this._volume = volume;
             return;
@@ -658,6 +663,14 @@ export class MediaVideo extends Component {
      */
     public isPlaying() {
         return this._currentState == VideoState.PLAYING || this._targetState == VideoState.PLAYING;
+    }
+
+    
+    public seek(time: number) {
+        this.pause();
+        this._seekTime = time;
+        this._video.currentTime = time;
+        this.resume();
     }
 
     private _isInPlaybackState() {

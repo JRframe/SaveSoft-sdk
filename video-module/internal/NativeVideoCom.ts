@@ -9,9 +9,10 @@ import { UITransform } from 'cc';
 import { Vec3 } from 'cc';
 import { oops } from 'db://oops-framework/core/Oops';
 import { VideoClip } from 'cc';
-import { MediaVideo } from '../../mediaVideo/mediaVideo';
+import { EventType, MediaVideo } from '../../mediaVideo/mediaVideo';
 import { UIMainVideoComp } from '../../../game/UIMainVideo/UIMainVideoComp';
 import { EventHandler } from 'cc';
+import { UIOpacity } from 'cc';
 const { ccclass, property } = _decorator;
 
 @ccclass('NativeVideoCom')
@@ -24,19 +25,23 @@ export class NativeVideoCom extends VideoCom {
     @property(MediaVideo)
     mediaVideo: MediaVideo = null!;
 
+    @property(UIOpacity)
+    uiOpacity: UIOpacity = null!;
+
+    @property(UITransform)
+    videoTransform: UITransform = null!
+
+    @property(Boolean)
+    isInited: boolean = false;
+
     protected onLoad(): void {
-
-
-        // this.mVideoPlayer.node.on(VideoPlayer.EventType.READY_TO_PLAY, this.onReadyToPlay, this);
-        // this.mVideoPlayer.node.on(VideoPlayer.EventType.STOPPED, this.onStopped, this);
-        // this.mVideoPlayer.node.on(VideoPlayer.EventType.COMPLETED, this.onCompleted, this);
-
         this.mPosterWidgetHigh = true;
         this.fixPosterSprite();
     }
 
     play(param: IVideoParam): void {
         super.play(param);
+        this.tryInit();
 
         let poster = param.poster ? param.poster : null;
         this.mVideoPlayer.fullScreenOnAwake = true;
@@ -55,28 +60,39 @@ export class NativeVideoCom extends VideoCom {
             this.mediaVideo.setRemoteSource(param.src);
         }
         this.mediaVideo.loop = param.loop;
-        UIMainVideoComp.getInstance().fadeinVideo();
     }
 
-    onReady(event: EventHandler){
+    onEventHandler(event: EventHandler, eventType: EventType){
+        console.log(`[video] NativeVideoCom onEventHandle, eventType:${eventType}. 透明度:${this.uiOpacity.opacity}`);
+        switch(eventType){
+            case EventType.PREPARING:
+                console.log("[video]画布宽度:", cc.winSize.width);
+                console.log("[video]画布高度:", cc.winSize.height);
+                this.videoTransform.width = cc.winSize.width;
+                this.videoTransform.height = cc.winSize.height;
+                this.mediaVideo.play();
+                break;
+            case EventType.STOPPED:
+                this.uiOpacity.opacity = 0;
+                this.onStopped();
+                break;
+            case EventType.PLAYING:
+                UIMainVideoComp.getInstance().fadeinVideo();
+                this.uiOpacity.opacity = 255;
+                break;
+        }
+    }
 
-        console.log("[video] NativeVideoCom 准备好播放了");
-        this.mediaVideo.play();
-
-        // const VideoWidth = 1080;
-        // const VideoHeight = 1920;
-        // super.onReadyToPlay();
-        // const width = screen.windowSize.width;
-        // const height = screen.windowSize.height;
-        // // this.mediaVideo.play();
-        // this.mVideoPlayer.play();
-        // let scaleRate = height / VideoHeight;
-        // //this.videoSprite.node.scale = new Vec3(scaleRate,scaleRate,scaleRate);
+    tryInit(){
+        if(this.isInited) return;
+        this.mediaVideo.node.active = true;
+        this.mVideoPlayer.node.active = true;
+        this.isInited = true;
     }
 
     stop(){
         super.stop();
-        this.mVideoPlayer.stop();
+        this.mediaVideo.stop();
         this.onStopped();
     }
 
@@ -114,24 +130,18 @@ export class NativeVideoCom extends VideoCom {
     }
 
     protected onDestroy(): void {
-        this.mVideoPlayer.node.off(VideoPlayer.EventType.READY_TO_PLAY, this.onReadyToPlay, this);
-        this.mVideoPlayer.node.off(VideoPlayer.EventType.STOPPED, this.onStopped, this);
-        this.mVideoPlayer.node.off(VideoPlayer.EventType.COMPLETED, this.onCompleted, this);
         super.onDestroy();
     }
 
     seek(time: number): void {
-        this.mVideoPlayer.currentTime = time;
+        this.mediaVideo.seek(time);
     }
     
     getDuration(): number{
-        return this.mVideoPlayer.duration;
+        return this.mediaVideo.duration;
     }
 
     getCurrentTime(): number{
-        return this.mVideoPlayer.currentTime;
+        return this.mediaVideo.currentTime;
     }
-
 }
-
-
