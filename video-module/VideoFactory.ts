@@ -18,8 +18,6 @@ export class VideoFactory{
     }
 
     createVideo(): Node{
-
-        console.log("sys.platform = " + sys.platform);
         if(BYTEDANCE)
         {
             return ViewUtil.createPrefabNode("common/video/TTVideo", "resources");
@@ -28,23 +26,16 @@ export class VideoFactory{
         {
             return ViewUtil.createPrefabNode("common/video/WeChatVideo", "resources");
         }
-        else
+        else if(CC_EDITOR || sys.isNative)
         {
-            console.log(`[video] 创建NativeVideo`);
+            console.log("sys.platform = " + sys.platform);
             return ViewUtil.createPrefabNode("common/video/NativeVideo", "resources");
         }
-
-
-        // else if(sys.isNative)
-        // {
-        //     console.log("sys.platform = " + sys.platform);
-            
-        //     return ViewUtil.createPrefabNode("common/video/NativeVideo", "resources");
-        // }
-        // else
-        // {
-        //     return ViewUtil.createPrefabNode("common/video/DefaultVideo", "resources");
-        // }
+        else
+        {
+            console.log("sys.platform = " + sys.platform);
+            return ViewUtil.createPrefabNode("common/video/DefaultVideo", "resources");
+        }
     }
 }
 
