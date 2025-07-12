@@ -79,10 +79,6 @@ export class NativeVideoCom extends VideoCom {
                 this.onStopped();
                 break;
             case EventType.PLAYING:
-                if (this.uiOpacity.opacity == 0) {
-                    this.uiOpacity.opacity = 255;
-                    UIMainVideoComp.getInstance().fadeinVideo();
-                }
                 break;
         }
     }
