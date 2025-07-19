@@ -47,13 +47,14 @@ export class SdkManager extends Component {
         }
         else if(sys.os == sys.OS.ANDROID && sys.isNative)
         {
+            const forceDefaultSdk = false;
             // 判断是否是调试模式
-            if(DEBUG){
+            if(DEBUG && forceDefaultSdk){
                 console.log("ANDROID Native , Debug模式, 创建默认sdk");
                 this.createDefaultSdk();
             }
             else{
-                console.log("ANDROID Native , Release模式, 创建默认sdk");
+                console.log("ANDROID Native , Release模式, 创建飞猪sdk");
                 this.createFeiZhuSdk();
             }
 
