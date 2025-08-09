@@ -73,10 +73,10 @@ export class FeiZhuSdk implements ISdk{
     login(cb: (loginresult: ILoginResult) => void): void {
         this.mLoginCB = cb;
 
-        native.bridge.sendToNative('fz_login');
+        native.bridge.sendToNative('GyLogin');
     }
     logout(): void {
-        native.bridge.sendToNative('fz_logout');
+        native.bridge.sendToNative('GyLogout');
     }
 
     private async exchangeSession() {
