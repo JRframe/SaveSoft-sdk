@@ -1,3 +1,19 @@
+/*
+ * @Author: LiuGuoBing
+ * @Description: 媒体视频播放组件
+ * 
+ * 使用说明：
+ * 1. 播放本地视频：设置 clip 属性
+ * 2. 播放远程视频：调用 tryInitializeRemote() 然后 setRemoteSource()
+ * 3. 切换视频源：直接调用 setRemoteSource()，会自动清理之前的资源
+ * 4. 完全清理：在组件销毁前调用 dispose() 方法
+ * 
+ * 注意事项：
+ * - 多次调用 setRemoteSource 现在是安全的，会自动清理之前的视频流
+ * - 在 onDisable 时会自动清理资源
+ * - 如果需要手动清理，可以调用 dispose() 方法
+ */
+
 import { _decorator, Component, VideoClip, RenderableComponent, Texture2D, loader, EventHandler, game, Game, CCString, Material, Sprite, SpriteFrame, gfx, director, VideoPlayer } from 'cc';
 import { JSB } from 'cc/env';
 const { ccclass, property} = _decorator;
@@ -254,7 +270,19 @@ export class MediaVideo extends Component {
     }
 
     public tryInitializeRemote(source: string) {
-        if(this._isInitialize) return;
+        // 如果已经初始化且源相同，则直接返回
+        if(this._isInitialize && this._source === source) {
+            console.log(`[video] 已初始化相同源，跳过: ${source}`);
+            return;
+        }
+        
+        // 如果已经初始化但源不同，需要先清理
+        if(this._isInitialize && this._source !== source) {
+            console.log(`[video] 源已改变，重新初始化: ${this._source} -> ${source}`);
+            this._cleanupVideoResources();
+            this._isInitialize = false;
+        }
+        
         console.log(`[video] initializeRemote, ${source}`);
         this.clip = null!;
         this._source = source;
@@ -278,7 +306,9 @@ export class MediaVideo extends Component {
      */
     private _initializeNative() {
         //原生平台使用 FFmpeg 解析视频，不需要从 VideoPlayer 组件中获取数据源
-        this.VideoView.node.destroy();
+        if(this.VideoView && this.VideoView.node) {
+            this.VideoView.node.destroy();
+        }
 
         this._video = new window.gfx.Video();
         this._video.addEventListener('loaded', () => this._onMetaLoaded());
@@ -343,6 +373,49 @@ export class MediaVideo extends Component {
     }
 
     /**
+     * 清理和释放视频资源
+     */
+    private _cleanupVideoResources() {
+        if (!this._video) return;
+        
+        console.log(`[video] 开始清理视频资源`);
+        
+        if (JSB) {
+            // 原生平台清理
+            try {
+                // 停止播放
+                this._video.stop();
+                
+                // 销毁原生视频对象（这会自动清理所有资源和事件监听器）
+                this._video.destroy();
+            } catch (e) {
+                console.error(`[video] 清理原生视频资源时出错:`, e);
+            }
+        } else {
+            // 浏览器平台清理
+            try {
+                this._video.pause();
+                this._video.currentTime = 0;
+                this._video.src = '';
+                this._video.load(); // 重置视频元素
+            } catch (e) {
+                console.error(`[video] 清理浏览器视频资源时出错:`, e);
+            }
+        }
+        
+        // 重置状态
+        this._currentState = VideoState.IDLE;
+        this._targetState = VideoState.IDLE;
+        this._loaded = false;
+        this._seekTime = 0;
+        this._nativeDuration = 0;
+        this._nativeWidth = 0;
+        this._nativeHeight = 0;
+        
+        console.log(`[video] 视频资源清理完成`);
+    }
+
+    /**
      * 处理视频资源
      */
     private _updateVideoSource() {
@@ -358,8 +431,24 @@ export class MediaVideo extends Component {
         }
 
         console.log(`[video]_updateVideoSource, ${url}`);
+        
+        // 先清理之前的视频资源
+        if (this._video && JSB) {
+            this._cleanupVideoResources();
+            
+            // 重新创建原生视频对象
+            this._video = new window.gfx.Video();
+            this._video.addEventListener('loaded', () => this._onMetaLoaded());
+            this._video.addEventListener('ready', () => this._onReadyToPlay());
+            this._video.addEventListener('completed', () => this._onCompleted());
+            this._video.addEventListener('error', () => this._onError());
+            this._video.addEventListener('buffer_start', () => this._onBufferStart());
+            this._video.addEventListener('buffer_update', () => this._onBufferUpdate());
+            this._video.addEventListener('buffer_end', () => this._onBufferEnd());
+            this._video.addEventListener('frame_update', () => this._onFrameUpdate());
+        }
+        
         if (JSB) {
-            this._video.stop();
             this._video.setURL(url, this.cache);
             this._video.prepare();
         } else {
@@ -382,9 +471,19 @@ export class MediaVideo extends Component {
 
     // unregister game show and hide event handler
     public onDisable(): void {
+        console.log(`[video] onDisable 开始清理`);
         game.off(Game.EVENT_SHOW, this._onShow, this);
         game.off(Game.EVENT_HIDE, this._onHide, this);
+        
+        // 完整清理视频资源
         this.stop();
+        this._cleanupVideoResources();
+        
+        // 清空视频对象引用
+        this._video = null;
+        this._isInitialize = false;
+        
+        console.log(`[video] onDisable 清理完成`);
     }
 
     private _onShow(): void {
@@ -658,14 +757,12 @@ export class MediaVideo extends Component {
     public stop() {
         this._seekTime = 0;
         if (this._isInPlaybackState() && this._currentState != VideoState.STOP) {
-            // if (JSB) {
-            //     // this._video.stop();
-            // } else {
-            //     this._video.pause();
-            //     this._video.currentTime = 0;
-            // }
-            this._video.pause();
-            this._video.currentTime = 0;
+            if (JSB) {
+                this._video.stop();
+            } else {
+                this._video.pause();
+                this._video.currentTime = 0;
+            }
 
             this.node.emit('stopped', this);
             this._currentState = VideoState.STOP;
@@ -693,8 +790,13 @@ export class MediaVideo extends Component {
         }
     }
 
+    /**
+     * 清理视频资源
+     */
     public clear() {
-
+        console.log(`[video] 调用 clear 方法`);
+        this._cleanupVideoResources();
+        this._video = null;
     }
 
     /**
@@ -718,12 +820,58 @@ export class MediaVideo extends Component {
     }
 
     public setRemoteSource(source: string) {
-        this.clip = null!;
-        this._source = source;
+        console.log(`[video] setRemoteSource: ${source}`);
+        
+        // 如果已经在播放，先停止并清理
         if (this._currentState == VideoState.PLAYING) {
             this.stop();
         }
+        
+        // 清理之前的资源
+        if (this._video && JSB) {
+            this._cleanupVideoResources();
+        }
+        
+        this.clip = null!;
+        this._source = source;
+        
         this._updateVideoSource();
+    }
+
+    /**
+     * 完全释放视频播放器资源
+     * 在不再需要视频播放器时调用此方法
+     */
+    public dispose() {
+        console.log(`[video] 开始完全释放视频播放器资源`);
+        
+        // 停止播放
+        if (this._currentState === VideoState.PLAYING) {
+            this.stop();
+        }
+        
+        // 清理视频资源
+        this._cleanupVideoResources();
+        
+        // 清空对象引用
+        this._video = null;
+        this._isInitialize = false;
+        
+        // 清理纹理资源
+        if (this._texture0) {
+            this._texture0.destroy();
+            this._texture0 = null!;
+        }
+        if (this._texture1) {
+            this._texture1.destroy();
+            this._texture1 = null!;
+        }
+        if (this._texture2) {
+            this._texture2.destroy();
+            this._texture2 = null!;
+        }
+        
+        console.log(`[video] 视频播放器资源释放完成`);
     }
 }
 
