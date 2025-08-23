@@ -39,6 +39,7 @@ export class NativeVideoCom extends VideoCom {
         this.fixPosterSprite();
     }
 
+
     play(param: IVideoParam): void {
         super.play(param);
         this.tryInit();
@@ -56,6 +57,8 @@ export class NativeVideoCom extends VideoCom {
         }
         else{
             console.log(`[video] 播放远程视频, src: ${param.src}`);
+            // 同步设置VideoPlayer的remoteURL，确保视频源一致
+            this.mVideoPlayer.remoteURL = param.src;
             this.mediaVideo.tryInitializeRemote(param.src);
             this.mediaVideo.setRemoteSource(param.src);
         }
@@ -66,23 +69,34 @@ export class NativeVideoCom extends VideoCom {
         console.log(`[video] NativeVideoCom onEventHandle, eventType:${getEventName(eventType)}. 透明度:${this.uiOpacity.opacity}`);
         switch(eventType){
             case EventType.PREPARING:
+                console.log('[video] 视频准备中...');
                 break;
             case EventType.LOADED:
+                console.log('[video] 视频已加载，开始播放');
                 if (this.uiOpacity.opacity == 0) {
                     this.uiOpacity.opacity = 255;
                     UIMainVideoComp.getInstance().fadeinVideo();
                 }
-                this.mediaVideo.play();
+                // 确保MediaVideo组件状态正确后再播放
+                this.scheduleOnce(() => {
+                    this.mediaVideo.play();
+                }, 0.1);
                 break;
             case EventType.STOPPED:
+                console.log('[video] 视频已停止');
                 this.uiOpacity.opacity = 0;
                 this.onStopped();
                 break;
             case EventType.PLAYING:
+                console.log('[video] 视频正在播放');
                 if (this.uiOpacity.opacity == 0) {
                     this.uiOpacity.opacity = 255;
                     UIMainVideoComp.getInstance().fadeinVideo();
                 }
+                break;
+            case EventType.ERROR:
+                console.log('[video] 视频播放出错');
+                this.uiOpacity.opacity = 0;
                 break;
         }
     }
@@ -138,7 +152,18 @@ export class NativeVideoCom extends VideoCom {
 
     protected onDestroy(): void {
         super.onDestroy();
+        console.log('[video] NativeVideoCom onDestroy 开始清理视频资源');
+        
+        // 停止视频播放
+        if (this.mediaVideo) {
+            this.mediaVideo.stop();
+            // 完全清理视频资源
+            this.mediaVideo.dispose();
+        }
+        
+        console.log('[video] NativeVideoCom onDestroy 完成');
     }
+
 
     seek(time: number): void {
         this.mediaVideo.seek(time);

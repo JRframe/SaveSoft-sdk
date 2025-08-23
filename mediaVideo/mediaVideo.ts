@@ -107,7 +107,7 @@ export class MediaVideo extends Component {
     @property
     private _source: string = '';             //视频链接
     @property
-    private _clip: VideoClip = null;            //视频资源
+    private _clip: VideoClip = null!;            //视频资源
 
     private _seekTime: number = 0;               //搜寻时间 
     private _nativeDuration: number = 0;         //原生的持续时间
@@ -136,7 +136,7 @@ export class MediaVideo extends Component {
     }
 
     @property(VideoPlayer)
-    VideoView: VideoPlayer = null;
+    VideoView: VideoPlayer = null!;
 
     @property
     get source() {
@@ -156,7 +156,7 @@ export class MediaVideo extends Component {
     loop: boolean = false;
     
     @property(RenderableComponent)
-    public render: RenderableComponent = null;
+    public render: RenderableComponent = null!;
 
     // rgb material
     @property([Material])
@@ -279,6 +279,10 @@ export class MediaVideo extends Component {
         // 如果已经初始化但源不同，需要先清理
         if(this._isInitialize && this._source !== source) {
             console.log(`[video] 源已改变，重新初始化: ${this._source} -> ${source}`);
+            // 清理前先停止播放，避免正在播放时清理资源
+            if (this._currentState === VideoState.PLAYING) {
+                this.stop();
+            }
             this._cleanupVideoResources();
             this._isInitialize = false;
         }
@@ -286,6 +290,13 @@ export class MediaVideo extends Component {
         console.log(`[video] initializeRemote, ${source}`);
         this.clip = null!;
         this._source = source;
+        
+        // 同步设置VideoPlayer的remoteURL（如果存在）
+        if (this.VideoView) {
+            this.VideoView.remoteURL = source;
+            console.log(`[video] initializeRemote 同步设置VideoPlayer.remoteURL: ${source}`);
+        }
+        
         this._initialize();
         this._isInitialize = true;
     }
@@ -306,20 +317,33 @@ export class MediaVideo extends Component {
      */
     private _initializeNative() {
         //原生平台使用 FFmpeg 解析视频，不需要从 VideoPlayer 组件中获取数据源
-        if(this.VideoView && this.VideoView.node) {
+        if(this.VideoView && this.VideoView.node && this.VideoView.node.isValid) {
             this.VideoView.node.destroy();
         }
 
-        this._video = new window.gfx.Video();
-        this._video.addEventListener('loaded', () => this._onMetaLoaded());
-        this._video.addEventListener('ready', () => this._onReadyToPlay());
-        this._video.addEventListener('completed', () => this._onCompleted());
-        this._video.addEventListener('error', () => this._onError());
-        this._video.addEventListener('buffer_start', () => this._onBufferStart());
-        this._video.addEventListener('buffer_update', () => this._onBufferUpdate());
-        this._video.addEventListener('buffer_end', () => this._onBufferEnd());
-        this._video.addEventListener('frame_update', () => this._onFrameUpdate());
-
+        try {
+            // 如果已经存在视频对象，先清理
+            if (this._video) {
+                console.log('[video] 清理现有的原生视频对象');
+                this._cleanupVideoResources();
+            }
+            
+            this._video = new window.gfx.Video();
+            this._video.addEventListener('loaded', () => this._onMetaLoaded());
+            this._video.addEventListener('ready', () => this._onReadyToPlay());
+            this._video.addEventListener('completed', () => this._onCompleted());
+            this._video.addEventListener('error', () => this._onError());
+            this._video.addEventListener('buffer_start', () => this._onBufferStart());
+            this._video.addEventListener('buffer_update', () => this._onBufferUpdate());
+            this._video.addEventListener('buffer_end', () => this._onBufferEnd());
+            this._video.addEventListener('frame_update', () => this._onFrameUpdate());
+            
+            console.log('[video] 原生视频播放器初始化成功');
+        } catch (error) {
+            console.error('[video] 初始化原生视频播放器失败:', error);
+            this._video = null;
+            this._currentState = VideoState.ERROR;
+        }
     }
 
     /**
@@ -380,14 +404,28 @@ export class MediaVideo extends Component {
         
         console.log(`[video] 开始清理视频资源`);
         
+        // 先重置状态，防止在清理过程中有新的回调
+        this._currentState = VideoState.IDLE;
+        this._targetState = VideoState.IDLE;
+        this._loaded = false;
+        this._seekTime = 0;
+        this._nativeDuration = 0;
+        this._nativeWidth = 0;
+        this._nativeHeight = 0;
+        
         if (JSB) {
             // 原生平台清理
             try {
                 // 停止播放
-                this._video.stop();
+                if (typeof this._video.stop === 'function') {
+                    this._video.stop();
+                }
                 
-                // 销毁原生视频对象（这会自动清理所有资源和事件监听器）
-                this._video.destroy();
+                // 原生视频对象可能没有removeEventListener方法
+                // 直接销毁即可，事件监听器会自动清理
+                if (typeof this._video.destroy === 'function') {
+                    this._video.destroy();
+                }
             } catch (e) {
                 console.error(`[video] 清理原生视频资源时出错:`, e);
             }
@@ -402,15 +440,6 @@ export class MediaVideo extends Component {
                 console.error(`[video] 清理浏览器视频资源时出错:`, e);
             }
         }
-        
-        // 重置状态
-        this._currentState = VideoState.IDLE;
-        this._targetState = VideoState.IDLE;
-        this._loaded = false;
-        this._seekTime = 0;
-        this._nativeDuration = 0;
-        this._nativeWidth = 0;
-        this._nativeHeight = 0;
         
         console.log(`[video] 视频资源清理完成`);
     }
@@ -432,29 +461,53 @@ export class MediaVideo extends Component {
 
         console.log(`[video]_updateVideoSource, ${url}`);
         
-        // 先清理之前的视频资源
-        if (this._video && JSB) {
-            this._cleanupVideoResources();
+        // 只在JSB平台且需要切换源时才清理和重创建
+        if (JSB && this._video) {
+            // 检查当前状态，如果正在播放则先停止
+            if (this._currentState === VideoState.PLAYING) {
+                try {
+                    this._video.stop();
+                } catch (e) {
+                    console.warn('[video] 停止播放时出错:', e);
+                }
+            }
             
-            // 重新创建原生视频对象
-            this._video = new window.gfx.Video();
-            this._video.addEventListener('loaded', () => this._onMetaLoaded());
-            this._video.addEventListener('ready', () => this._onReadyToPlay());
-            this._video.addEventListener('completed', () => this._onCompleted());
-            this._video.addEventListener('error', () => this._onError());
-            this._video.addEventListener('buffer_start', () => this._onBufferStart());
-            this._video.addEventListener('buffer_update', () => this._onBufferUpdate());
-            this._video.addEventListener('buffer_end', () => this._onBufferEnd());
-            this._video.addEventListener('frame_update', () => this._onFrameUpdate());
-        }
-        
-        if (JSB) {
-            this._video.setURL(url, this.cache);
-            this._video.prepare();
-        } else {
+            // 不需要完全销毁，只需要重新设置URL
+            try {
+                this._video.setURL(url, this.cache);
+                this._video.prepare();
+            } catch (e) {
+                console.error('[video] 设置视频URL时出错:', e);
+                // 如果设置失败，则重新创建
+                this._cleanupVideoResources();
+                
+                // 重新创建原生视频对象
+                try {
+                    this._video = new window.gfx.Video();
+                    this._video.addEventListener('loaded', () => this._onMetaLoaded());
+                    this._video.addEventListener('ready', () => this._onReadyToPlay());
+                    this._video.addEventListener('completed', () => this._onCompleted());
+                    this._video.addEventListener('error', () => this._onError());
+                    this._video.addEventListener('buffer_start', () => this._onBufferStart());
+                    this._video.addEventListener('buffer_update', () => this._onBufferUpdate());
+                    this._video.addEventListener('buffer_end', () => this._onBufferEnd());
+                    this._video.addEventListener('frame_update', () => this._onFrameUpdate());
+                    
+                    this._video.setURL(url, this.cache);
+                    this._video.prepare();
+                } catch (createError) {
+                    console.error('[video] 重新创建视频对象失败:', createError);
+                    this._video = null;
+                    return;
+                }
+            }
+        } else if (!JSB && this._video) {
             this._loaded = false;
             this._video.pause();
             this._video.src = url;
+        } else if (!this._video) {
+            console.error('[video] 视频对象未初始化');
+            return;
         }
 
         this.node.emit('preparing', this);
@@ -500,13 +553,49 @@ export class MediaVideo extends Component {
     }
 
     update(deltaTime: number) {
-        if (this._isInPlaybackState() && !JSB) {
-            this._texture0.uploadData(this._video);
-            this._updateMaterial();
+        if (this._isInPlaybackState() && !JSB && this._video && this._texture0) {
+            // 添加安全检查，确保纹理对象有效且视频元素准备就绪
+            if (!this._texture0.isValid) {
+                console.warn('[video] 纹理对象无效，跳过update');
+                return;
+            }
+            
+            // 确保视频元素状态正常
+            if (!this._video.videoWidth || !this._video.videoHeight) {
+                return;
+            }
+            
+            // 检查当前状态是否允许纹理更新
+            if (this._currentState === VideoState.IDLE || 
+                this._currentState === VideoState.ERROR) {
+                return;
+            }
+            
+            try {
+                this._texture0.uploadData(this._video);
+                this._updateMaterial();
+            } catch (error) {
+                console.error('[video] update时纹理上传发生错误:', error);
+                // 标记错误状态，但不立即停止播放，给播放器一次恢复的机会
+                this._currentState = VideoState.ERROR;
+                // 只有在连续错误时才停止播放
+                this.scheduleOnce(() => {
+                    if (this._currentState === VideoState.ERROR) {
+                        console.log('[video] 持续错误状态，停止播放');
+                        this.stop();
+                    }
+                }, 1.0); // 1秒后检查
+            }
         } 
     }
 
     private _copyTextureToTexture2D(texture2D: Texture2D, texture: gfx.Texture) {
+        // 添加安全检查
+        if (!director.root || !director.root.device) {
+            console.warn('[video] director.root 或 device 不可用，跳过纹理复制');
+            return;
+        }
+        
         if (!buffers.length) {
             buffers[0] = new Uint8Array(texture.size);
         }
@@ -514,27 +603,54 @@ export class MediaVideo extends Component {
         regions[0].texExtent.height = texture.height;
         regions[0].texSubres.mipLevel = 0;
         regions[0].texSubres.baseArrayLayer = 0;
-        director.root.device.copyTextureToBuffers(texture, buffers, regions);
-        texture2D.uploadData(buffers[0]);
-
+        
+        try {
+            director.root.device.copyTextureToBuffers(texture, buffers, regions);
+            texture2D.uploadData(buffers[0]);
+        } catch (error) {
+            console.error('[video] 纹理复制时发生错误:', error);
+        }
     }
 
     /**
      * 更新材质
      */
     protected _updateMaterial(): void {
-        let material = this.render.getMaterialInstance(0);
-        if (material) {
-            material.setProperty('texture0', this._texture0);
-            switch (this._pixelFormat) {
-                case PixelFormat.I420:
-                    material.setProperty('texture2', this._texture2);
-                // fall through
-                case PixelFormat.NV12:
-                case PixelFormat.NV21:
-                    material.setProperty('texture1', this._texture1);
-                    break;
+        if (!this.render) {
+            console.warn('[video] render组件为空，跳过材质更新');
+            return;
+        }
+        
+        // 增加状态检查，防止在不合适的时机更新材质
+        if (this._currentState === VideoState.IDLE || 
+            this._currentState === VideoState.ERROR ||
+            this._currentState === VideoState.STOP) {
+            console.warn('[video] 当前状态不允许材质更新，跳过');
+            return;
+        }
+        
+        try {
+            let material = this.render.getMaterialInstance(0);
+            if (material && this._texture0) {
+                material.setProperty('texture0', this._texture0);
+                switch (this._pixelFormat) {
+                    case PixelFormat.I420:
+                        if (this._texture2) {
+                            material.setProperty('texture2', this._texture2);
+                        }
+                    // fall through
+                    case PixelFormat.NV12:
+                    case PixelFormat.NV21:
+                        if (this._texture1) {
+                            material.setProperty('texture1', this._texture1);
+                        }
+                        break;
+                }
             }
+        } catch (error) {
+            console.error('[video] 更新材质时发生错误:', error);
+            // 发生错误时不要立即停止播放，而是标记错误状态
+            this._currentState = VideoState.ERROR;
         }
     }
 
@@ -597,6 +713,7 @@ export class MediaVideo extends Component {
     }
 
     private _onReadyToPlay() {        
+        console.log('[video] _onReadyToPlay 开始');
         this._updatePixelFormat();
         this._currentState = VideoState.PREPARED;
         if (this._seekTime > 0.1) {
@@ -605,7 +722,13 @@ export class MediaVideo extends Component {
         this._updateTexture();
         this.node.emit('ready', this);
         EventHandler.emitEvents(this.videoPlayerEvent, this, EventType.READY);
-        this._targetState == VideoState.PLAYING && this.play();
+        
+        // 确保在准备就绪后正确开始播放
+        if (this._targetState == VideoState.PLAYING) {
+            console.log('[video] 目标状态为播放，开始播放视频');
+            this.play();
+        }
+        console.log('[video] _onReadyToPlay 完成');
     }
 
     private _onCompleted() {
@@ -647,25 +770,51 @@ export class MediaVideo extends Component {
     }
 
     private _onFrameUpdate() {
-        if (this._isInPlaybackState() && JSB) {
-            // return
+        // 添加安全检查，防止在资源清理后仍然执行纹理上传
+        if (!this._isInPlaybackState() || !JSB || !this._video) return;
+        
+        // 检查纹理对象是否有效
+        if (!this._texture0 || !this._texture0.isValid || 
+            !this._texture1 || !this._texture1.isValid || 
+            !this._texture2 || !this._texture2.isValid) {
+            console.warn('[video] 纹理对象无效，跳过帧更新');
+            return;
+        }
+        
+        // 检查当前状态是否允许纹理更新
+        if (this._currentState === VideoState.IDLE || 
+            this._currentState === VideoState.ERROR) {
+            return;
+        }
+        
+        try {
             let datas: any = this._video.getDatas();
-            if (!datas.length) return;
+            if (!datas || !datas.length) return;
 
-            if (datas.length > 0) this._texture0.uploadData(datas[0]);
-            if (datas.length > 1) this._texture1.uploadData(datas[1]);
-            if (datas.length > 2) this._texture2.uploadData(datas[2]);
-            // let textures: any = this._video.getTextures();
-            // if (textures.length > 0) this._copyTextureToTexture2D(this._texture0, textures[0]);
-            // if (textures.length > 1) this._copyTextureToTexture2D(this._texture1, textures[1]);
-            // if (textures.length > 2) this._copyTextureToTexture2D(this._texture2, textures[2]);
-            // let material = this.render.getMaterial(0);
-            // if (textures.length > 0) material.setProperty('texture0', textures[0]);
-            // if (textures.length > 1) material.setProperty('texture1', textures[1]);
-            // if (textures.length > 2) material.setProperty('texture2', textures[2]);
-            // material.passes[0].update();
+            // 安全地上传纹理数据，添加错误处理
+            if (datas.length > 0 && this._texture0 && this._texture0.isValid) {
+                this._texture0.uploadData(datas[0]);
+            }
+            if (datas.length > 1 && this._texture1 && this._texture1.isValid) {
+                this._texture1.uploadData(datas[1]);
+            }
+            if (datas.length > 2 && this._texture2 && this._texture2.isValid) {
+                this._texture2.uploadData(datas[2]);
+            }
+            
             this._updateMaterial();
-        } 
+        } catch (error) {
+            console.error('[video] 帧更新时发生错误:', error);
+            // 标记错误状态，但不立即停止播放，给播放器恢复机会
+            this._currentState = VideoState.ERROR;
+            // 延迟检查是否需要停止播放
+            this.scheduleOnce(() => {
+                if (this._currentState === VideoState.ERROR) {
+                    console.log('[video] 帧更新持续错误，停止播放');
+                    this.stop();
+                }
+            }, 2.0); // 给更长的恢复时间
+        }
     }
     
 
@@ -822,14 +971,30 @@ export class MediaVideo extends Component {
     public setRemoteSource(source: string) {
         console.log(`[video] setRemoteSource: ${source}`);
         
-        // 如果已经在播放，先停止并清理
+        // 如果源相同，则无需重新设置
+        if (this._source === source && this._currentState == VideoState.PLAYING) {
+            console.log(`[video] 源相同，跳过设置: ${source}, ${this._currentState}`);
+            return;
+        }
+        
+        // 如果已经在播放，先停止
         if (this._currentState == VideoState.PLAYING) {
             this.stop();
         }
         
-        // 清理之前的资源
-        if (this._video && JSB) {
-            this._cleanupVideoResources();
+        // 同步设置VideoPlayer的remoteURL（如果存在）
+        if (this.VideoView) {
+            this.VideoView.remoteURL = source;
+            console.log(`[video] 同步设置VideoPlayer.remoteURL: ${source}`);
+        }
+        
+        // 只在必要时清理资源（原生平台且源不同）
+        if (JSB && this._video && this._source !== source) {
+            // 不完全清理，只重置状态
+            this._currentState = VideoState.IDLE;
+            this._targetState = VideoState.IDLE;
+            this._loaded = false;
+            this._seekTime = 0;
         }
         
         this.clip = null!;
@@ -857,17 +1022,31 @@ export class MediaVideo extends Component {
         this._video = null;
         this._isInitialize = false;
         
-        // 清理纹理资源
-        if (this._texture0) {
-            this._texture0.destroy();
+        // 安全地清理纹理资源
+        try {
+            if (this._texture0) {
+                if (this._texture0.isValid) {
+                    this._texture0.destroy();
+                }
+                this._texture0 = null!;
+            }
+            if (this._texture1) {
+                if (this._texture1.isValid) {
+                    this._texture1.destroy();
+                }
+                this._texture1 = null!;
+            }
+            if (this._texture2) {
+                if (this._texture2.isValid) {
+                    this._texture2.destroy();
+                }
+                this._texture2 = null!;
+            }
+        } catch (error) {
+            console.error('[video] 清理纹理资源时发生错误:', error);
+            // 即使销毁失败，也要清空引用
             this._texture0 = null!;
-        }
-        if (this._texture1) {
-            this._texture1.destroy();
             this._texture1 = null!;
-        }
-        if (this._texture2) {
-            this._texture2.destroy();
             this._texture2 = null!;
         }
         
