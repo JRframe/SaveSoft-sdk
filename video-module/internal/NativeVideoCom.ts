@@ -60,7 +60,6 @@ export class NativeVideoCom extends VideoCom {
             // 同步设置VideoPlayer的remoteURL，确保视频源一致
             this.mVideoPlayer.remoteURL = param.src;
             this.mediaVideo.tryInitializeRemote(param.src);
-            this.mediaVideo.setRemoteSource(param.src);
         }
         this.mediaVideo.loop = param.loop;
     }
@@ -77,10 +76,7 @@ export class NativeVideoCom extends VideoCom {
                     this.uiOpacity.opacity = 255;
                     UIMainVideoComp.getInstance().fadeinVideo();
                 }
-                // 确保MediaVideo组件状态正确后再播放
-                this.scheduleOnce(() => {
-                    this.mediaVideo.play();
-                }, 0.1);
+                this.mediaVideo.play();
                 break;
             case EventType.STOPPED:
                 console.log('[video] 视频已停止');
