@@ -15,7 +15,9 @@
  * - 视频切换时会保持前一帧内容，避免闪烁
  */
 
-import { _decorator, Component, VideoClip, RenderableComponent, Texture2D, loader, EventHandler, game, Game, CCString, Material, Sprite, SpriteFrame, gfx, director, VideoPlayer } from 'cc';
+import { UITransform } from 'cc';
+import { UIOpacity } from 'cc';
+import { _decorator, Component, VideoClip, RenderableComponent, Texture2D, loader, EventHandler, game, Game, CCString, Material, Sprite, SpriteFrame, gfx, director, VideoPlayer, screen } from 'cc';
 import { JSB } from 'cc/env';
 const { ccclass, property} = _decorator;
 export enum EventType {     //事件类型
@@ -40,8 +42,8 @@ enum VideoState {       //视频状态
     PREPARED = 2,       //准备完成
     PLAYING = 3,        //播放中
     PAUSED = 4,         //暂停
-    STOP = 5,
-    COMPLETED = 5       //播放完成
+    STOP = 5,           //停止
+    COMPLETED = 6       //播放完成
 };
 
 enum ReadyState {       //准备状态
@@ -94,8 +96,6 @@ export function getEventName(eventType: EventType): string {
             return 'buffer_update';
         case EventType.BUFFER_END:
             return 'buffer_end';
-        case EventType.INIT: // EventType没有INIT，去除此项以避免报错
-            return 'init';
         default:
             return 'unknown';
     }
@@ -125,12 +125,15 @@ export class MediaVideo extends Component {
     private _isBuffering: boolean = false;              
     private _inBackground: boolean = false;             //是否在后台
     private _lastPlayState: boolean = false;            //上一次播放状态
-    private _volume: number = -1;
+    private _volume: number = 1;
     
-    // 新增：用于平滑切换的属性
-    private _isTransitioning: boolean = false;         //是否正在切换视频
-    private _keepLastFrame: boolean = false;           //保持最后一帧
-    private _transitionTimeout: any = null;            //切换超时定时器
+    /** 用于平滑切换的临时Sprite */
+    @property(Sprite)
+    private tempSprite: Sprite = null!;
+
+    /** 视频的透明度 */
+    @property(UIOpacity)
+    private videoOpacity: UIOpacity = null!;
     
     @property(VideoClip)
     get clip() {
@@ -195,10 +198,6 @@ export class MediaVideo extends Component {
     @property(Number)
     height: number = 1920;
 
-    // 新增：视频切换平滑过渡时间（毫秒）
-    @property(Number)
-    transitionDuration: number = 200;
-
     // current position of the video which is playing
     get currentTime() {
         if (!this._video) return 0;
@@ -240,30 +239,6 @@ export class MediaVideo extends Component {
         return this._nativeDuration;
     }
     
-    // get width(): number {
-    //     if (!this._isInPlaybackState()) return 0;
-    //     if (this._nativeWidth > 0) return this._nativeWidth;
-    //     if (JSB) {
-    //         this._nativeWidth = this._video.width();
-    //     } else {
-    //         let width = this._video.videoWidth;
-    //         this._nativeWidth = isNaN(width) ? 0 : width;
-    //     }
-    //     return this._nativeWidth;
-    // }
-    
-    // get height(): number {
-    //     if (!this._isInPlaybackState()) return 0;
-    //     if (this._nativeHeight > 0) return this._nativeHeight;
-    //     if (JSB) {
-    //         this._nativeHeight = this._video.height();
-    //     } else {
-    //         let height = this._video.videoHeight;
-    //         this._nativeHeight = isNaN(height) ? 0 : height;
-    //     }
-    //     return this._nativeHeight;
-    // }
-    
     // not accurate because native event is async, larger than actual percentage.
     get bufferPercentage(): number {
         if (!this._video) return 0;
@@ -276,6 +251,8 @@ export class MediaVideo extends Component {
 
     private _isInitialize: boolean = false;
 
+    private _isTransitioning: boolean = false;
+
     start() {
 
     }
@@ -286,13 +263,6 @@ export class MediaVideo extends Component {
         // 如果已经初始化且源相同，则直接返回
         if(this._isInitialize && currentSource === source) {
             console.log(`[video] 已初始化相同源，跳过: ${source}`);
-            return;
-        }
-        
-        // 如果已经初始化但源不同，需要先清理
-        if(this._isInitialize && currentSource !== source) {
-            console.log(`[video] 源已改变，开始平滑切换: ${currentSource} -> ${source}`);
-            this._startSmoothTransition(source);
             return;
         }
         
@@ -309,147 +279,8 @@ export class MediaVideo extends Component {
         this.setRemoteSource(source);
     }
 
-    /**
-     * 开始平滑切换
-     */
-    private _startSmoothTransition(source: string) {
-        this.source = source;
-        console.log(`[video] 开始平滑切换过程`);
-        this._isTransitioning = true;
-        this._keepLastFrame = true;
-        
-        // 清理之前的定时器
-        if (this._transitionTimeout) {
-            clearTimeout(this._transitionTimeout);
-            this._transitionTimeout = null;
-        }
-        
-        // 如果正在播放，先停止播放但不清理纹理
-        if (this._video && this._currentState === VideoState.PLAYING) {
-            try {
-                if (JSB) {
-                    this._video.stop();
-                } else {
-                    this._video.pause();
-                }
-            } catch (e) {
-                console.warn('[video] 停止播放时出错:', e);
-            }
-        }
 
-        console.log(`[video] 停止播放但不清理纹理`);
-        
-        // 立即停止所有纹理更新操作，防止崩溃
-        this._currentState = VideoState.PREPARING;
-        
-        // 延迟清理资源，让新视频有时间准备
-        this._transitionTimeout = setTimeout(() => {
-            this._cleanupVideoResourcesForTransition();
-        }, this.transitionDuration);
-    }
-
-    /**
-     * 完成平滑切换
-     */
-    private _finishSmoothTransition() {
-        console.log(`[video] 完成平滑切换, ${this.source}`);
-        
-        // 清理定时器
-        if (this._transitionTimeout) {
-            clearTimeout(this._transitionTimeout);
-            this._transitionTimeout = null;
-        }
-        
-        this._isTransitioning = false;
-        this._keepLastFrame = false;
-        
-        this._initialize();
-        this.finalSetRemoteSource(this.source);
-    }
-
-    /**
-     * 切换专用的资源清理方法（保留纹理内容）
-     */
-    private _cleanupVideoResourcesForTransition() {
-        if (!this._video) {
-            // 即使没有视频对象，也要完成切换
-            this._finishSmoothTransition();
-            return;
-        }
-        
-        console.log(`[video] 开始切换专用资源清理（保留纹理）`);
-        
-        // 确保停止所有可能的纹理更新操作
-        this._currentState = VideoState.PREPARING;
-        this._targetState = VideoState.IDLE;
-        this._loaded = false;
-        this._seekTime = 0;
-        this._nativeDuration = 0;
-        this._nativeWidth = 0;
-        this._nativeHeight = 0;
-        
-        if (JSB) {
-            // 原生平台清理
-            try {
-                // 先停止播放
-                if (typeof this._video.stop === 'function') {
-                    this._video.stop();
-                }
-                
-                // 等待一帧，确保停止完成
-                this.scheduleOnce(() => {
-                    try {
-                        // 原生视频对象的清理，但不销毁纹理
-                        if (this._video && typeof this._video.destroy === 'function') {
-                            this._video.destroy();
-                        }
-                    } catch (e) {
-                        console.error(`[video] 延迟清理原生视频资源时出错:`, e);
-                    }
-                    
-                    // 清空视频对象引用，但保留纹理
-                    this._video = null;
-                    this._isInitialize = false;
-                    
-                    console.log(`[video] 切换专用资源清理完成`);
-                    
-                    // 立即开始新视频的初始化
-                    this._finishSmoothTransition();
-                }, 0.1);
-                
-            } catch (e) {
-                console.error(`[video] 清理原生视频资源时出错:`, e);
-                // 即使出错也要继续切换流程
-                this._video = null;
-                this._isInitialize = false;
-                this._finishSmoothTransition();
-            }
-        } else {
-            // 浏览器平台清理
-            try {
-                this._video.pause();
-                this._video.currentTime = 0;
-                this._video.src = '';
-                this._video.load(); // 重置视频元素
-                
-                // 清空视频对象引用，但保留纹理
-                this._video = null;
-                this._isInitialize = false;
-                
-                console.log(`[video] 切换专用资源清理完成`);
-                
-                // 立即开始新视频的初始化
-                this._finishSmoothTransition();
-            } catch (e) {
-                console.error(`[video] 清理浏览器视频资源时出错:`, e);
-                // 即使出错也要继续切换流程
-                this._video = null;
-                this._isInitialize = false;
-                this._finishSmoothTransition();
-            }
-        }
-    }
-
+    
     /**
      * 初始化
      */
@@ -473,8 +304,9 @@ export class MediaVideo extends Component {
 
         try {
             // 如果已经存在视频对象且不在切换中，先清理
-            if (this._video && !this._isTransitioning) {
+            if (this._video) {
                 console.log('[video] 清理现有的原生视频对象');
+                this.copyCurrentFrameToSprite();
                 this._cleanupVideoResources();
             }
             
@@ -500,23 +332,18 @@ export class MediaVideo extends Component {
      * initialize browser player, register video event handler
      */
      private _initializeBrowser(): void {
-        // @ts-ignore
-        this._video = this.VideoView._impl._video;
+        // 安全地获取VideoPlayer的内部video元素
+        if (!this.VideoView || !(this.VideoView as any)._impl) {
+            console.error('[video] VideoView 或其 _impl 属性不存在');
+            return;
+        }
+        
+        this._video = (this.VideoView as any)._impl._video;
         this._video.crossOrigin = 'anonymous';
         this._video.autoplay = false;
         this._video.loop = false;
         this._video.muted = false;
-        // this.textures = [
-        //     // @ts-ignore
-        //     new cc.renderer.Texture2D(cc.renderer.device, {
-        //         wrapS: gfx.WRAP_CLAMP,
-        //         wrapT: gfx.WRAP_CLAMP,
-        //         genMipmaps: false,
-        //         premultiplyAlpha: false,
-        //         flipY: false,
-        //         format: gfx.TEXTURE_FMT_RGBA8
-        //     })
-        // ];
+        
         this._video.addEventListener('loadedmetadata', () => this._onMetaLoaded());
         this._video.addEventListener('ended', () => this._onCompleted());
         this._loaded = false;
@@ -533,17 +360,6 @@ export class MediaVideo extends Component {
         this._video.addEventListener('canplay', onCanPlay);
         this._video.addEventListener('canplaythrough', onCanPlay);
         this._video.addEventListener('suspend', onCanPlay);
-
-        // @ts-ignore
-        // let gl = cc.renderer.device._gl;
-        // this.update = dt => {
-        //     if (this._isInPlaybackState()) {
-        //         gl.bindTexture(gl.TEXTURE_2D, this.textures[0]._glID);
-        //         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.impl);
-        //         // @ts-ignore
-        //         cc.renderer.device._restoreTexture(0);
-        //     }
-        // };
     }
 
     /**
@@ -679,12 +495,7 @@ export class MediaVideo extends Component {
         game.off(Game.EVENT_HIDE, this._onHide, this);
         
         // 清理切换相关的定时器
-        if (this._transitionTimeout) {
-            clearTimeout(this._transitionTimeout);
-            this._transitionTimeout = null;
-        }
         this._isTransitioning = false;
-        this._keepLastFrame = false;
         
         // 完整清理视频资源
         this.stop();
@@ -895,8 +706,7 @@ export class MediaVideo extends Component {
             texture.reset({
                 width: width,
                 height: height,
-                //@ts-ignore
-                format:  format ? format : JSB ?gfx.Format.R8: gfx.Format.RGB8
+                format: format ? format : JSB ? gfx.Format.R8 : gfx.Format.RGB8
             });
         } catch (error) {
             console.error('[video] 重置纹理时发生错误:', error);
@@ -909,19 +719,19 @@ export class MediaVideo extends Component {
     }
 
     private _onReadyToPlay() {        
-        console.log('[video] _onReadyToPlay 开始');
+        
+        // tempSprite 和 video 切换
+        this._isTransitioning = false;
+        this.videoOpacity.opacity = 255;
+        this.tempSprite.node.active = false;
+
+        
         this._updatePixelFormat();
         this._currentState = VideoState.PREPARED;
         if (this._seekTime > 0.1) {
             this.currentTime = this._seekTime;
         }
         this._updateTexture();
-        
-        // 如果正在切换，完成平滑切换
-        if (this._isTransitioning) {
-            console.log('[video] 新视频准备就绪，完成平滑切换');
-            this._finishSmoothTransition();
-        }
         
         this.node.emit('ready', this);
         EventHandler.emitEvents(this.videoPlayerEvent, this, EventType.READY);
@@ -931,7 +741,6 @@ export class MediaVideo extends Component {
             console.log('[video] 目标状态为播放，开始播放视频');
             this.play();
         }
-        console.log('[video] _onReadyToPlay 完成');
     }
 
     private _onCompleted() {
@@ -1171,9 +980,23 @@ export class MediaVideo extends Component {
 
     
     public seek(time: number) {
+        if (!this._video) {
+            console.warn('[video] 视频对象不存在，无法进行seek操作');
+            this._seekTime = time;
+            return;
+        }
+        
         this.pause();
         this._seekTime = time;
-        this._video.currentTime = time;
+        
+        if (this._isInPlaybackState()) {
+            if (JSB) {
+                this._video.seek(time);
+            } else {
+                this._video.currentTime = time;
+            }
+        }
+        
         this.resume();
     }
 
@@ -1193,23 +1016,6 @@ export class MediaVideo extends Component {
             return;
         }
         
-        // 如果源不同且已初始化，启动平滑切换
-        if (currentSource != "")
-        {
-            if (this._isInitialize  && currentSource !== source) {
-                console.log(`[video] setRemoteSource 启动平滑切换: ${currentSource} -> ${source}`);
-                this._startSmoothTransition(source);
-                return;
-            } else if (currentSource === source && this._currentState !== VideoState.PLAYING) {
-                // 如果源相同但不在播放状态，说明可能需要重新播放
-                console.log(`[video] 源相同但非播放状态，允许重新设置: ${source}, 状态: ${this._currentState}`);
-            }
-        }
-
-        this.finalSetRemoteSource(source);
-    }
-
-    private finalSetRemoteSource(source: string) {
         // 同步设置VideoPlayer的remoteURL（如果存在）
         if (this.VideoView) {
             this.VideoView.remoteURL = source;
@@ -1221,21 +1027,7 @@ export class MediaVideo extends Component {
         this._updateVideoSource();
     }
 
-    /**
-     * 设置视频切换过渡时间
-     * @param duration 过渡时间（毫秒）
-     */
-    public setTransitionDuration(duration: number) {
-        this.transitionDuration = Math.max(50, Math.min(1000, duration)); // 限制在50-1000ms之间
-        console.log(`[video] 设置切换过渡时间: ${this.transitionDuration}ms`);
-    }
 
-    /**
-     * 检查是否正在切换视频
-     */
-    public isTransitioning(): boolean {
-        return this._isTransitioning;
-    }
 
     /**
      * 完全释放视频播放器资源
@@ -1243,14 +1035,6 @@ export class MediaVideo extends Component {
      */
     public dispose() {
         console.log(`[video] 开始完全释放视频播放器资源`);
-        
-        // 清理切换相关状态
-        if (this._transitionTimeout) {
-            clearTimeout(this._transitionTimeout);
-            this._transitionTimeout = null;
-        }
-        this._isTransitioning = false;
-        this._keepLastFrame = false;
         
         // 停止播放
         if (this._currentState === VideoState.PLAYING) {
@@ -1293,6 +1077,148 @@ export class MediaVideo extends Component {
         }
         
         console.log(`[video] 视频播放器资源释放完成`);
+    }
+
+    /**
+     * 将当前_texture0的图像复制到tempSprite上
+     * 复制的图像独立于_texture0，不会因为_texture0的变化而改变
+     * @returns {boolean} 是否复制成功
+     */
+    public copyCurrentFrameToSprite(): boolean {
+        // 检查必要条件
+        if (!this.tempSprite) {
+            console.warn('[video] copy,tempSprite未设置，无法复制图像');
+            return false;
+        }
+        
+        if (!this._texture0 || !this._texture0.isValid) {
+            console.warn('[video] copy,_texture0无效，无法复制图像');
+            return false;
+        }
+        
+        if (!this._isInPlaybackState()) {
+            console.warn('[video] copy,视频未处于播放状态，无法复制图像');
+            return false;
+        }
+
+        const transform = this.tempSprite.node.getComponent(UITransform)!;
+        transform.width = cc.winSize.width;
+        transform.height = cc.winSize.height;
+        this.tempSprite.node.active = true;
+        this._isTransitioning = true;
+
+        try {
+            console.log('[video] copy,开始复制当前帧到tempSprite');
+            
+            // 创建一个新的独立纹理对象
+            const copiedTexture = new Texture2D();
+            
+            // 设置纹理属性，与原纹理保持一致
+            copiedTexture.setFilters(Texture2D.Filter.LINEAR, Texture2D.Filter.LINEAR);
+            copiedTexture.setMipFilter(Texture2D.Filter.LINEAR);
+            copiedTexture.setWrapMode(Texture2D.WrapMode.CLAMP_TO_EDGE, Texture2D.WrapMode.CLAMP_TO_EDGE);
+            
+            // 初始化新纹理的尺寸和格式
+            copiedTexture.reset({
+                width: this._texture0.width,
+                height: this._texture0.height,
+                //@ts-ignore
+                format: JSB ? gfx.Format.R8 : gfx.Format.RGB8
+            });
+            
+            if (JSB) {
+                // 原生平台：通过buffer复制纹理数据
+                this._copyTextureDataNative(copiedTexture);
+            } else {
+                // 浏览器平台：通过canvas复制纹理数据
+                this._copyTextureDataBrowser(copiedTexture);
+            }
+            
+            // 为tempSprite创建或更新SpriteFrame
+            if (!this.tempSprite.spriteFrame) {
+                this.tempSprite.spriteFrame = new SpriteFrame();
+            }
+            
+            // 将复制的纹理赋值给tempSprite
+            this.tempSprite.spriteFrame.texture = copiedTexture;
+            
+            console.log('[video] 成功复制当前帧到tempSprite');
+            return true;
+            
+        } catch (error) {
+            console.error('[video] copy,复制当前帧到tempSprite时发生错误:', error);
+            return false;
+        }
+    }
+    
+    /**
+     * 原生平台纹理数据复制
+     * @param targetTexture 目标纹理
+     */
+    private _copyTextureDataNative(targetTexture: Texture2D): void {
+        // 检查director和device是否可用
+        if (!director.root || !director.root.device) {
+            throw new Error('director.root 或 device 不可用');
+        }
+        
+        const device = director.root.device;
+        const sourceTexture = this._texture0.getGFXTexture();
+        
+        if (!sourceTexture) {
+            throw new Error('源纹理的GFX纹理对象无效');
+        }
+        
+        // 创建临时buffer来存储纹理数据
+        const textureSize = sourceTexture.size;
+        const tempBuffer = new Uint8Array(textureSize);
+        
+        // 设置复制区域
+        const copyRegion = new gfx.BufferTextureCopy();
+        copyRegion.texExtent.width = sourceTexture.width;
+        copyRegion.texExtent.height = sourceTexture.height;
+        copyRegion.texSubres.mipLevel = 0;
+        copyRegion.texSubres.baseArrayLayer = 0;
+        
+        // 从源纹理读取数据到buffer
+        device.copyTextureToBuffers(sourceTexture, [tempBuffer], [copyRegion]);
+        
+        // 将buffer数据上传到目标纹理
+        targetTexture.uploadData(tempBuffer);
+    }
+    
+    /**
+     * 浏览器平台纹理数据复制
+     * @param targetTexture 目标纹理
+     */
+    private _copyTextureDataBrowser(targetTexture: Texture2D): void {
+        // 浏览器平台下，_texture0应该包含video元素的数据
+        if (!this._video) {
+            throw new Error('视频对象无效');
+        }
+        
+        // 创建离屏canvas来复制视频帧
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+            throw new Error('无法创建canvas上下文');
+        }
+        
+        // 设置canvas尺寸
+        canvas.width = this._video.videoWidth || this.width;
+        canvas.height = this._video.videoHeight || this.height;
+        
+        // 将当前视频帧绘制到canvas
+        ctx.drawImage(this._video, 0, 0, canvas.width, canvas.height);
+        
+        // 获取ImageData
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        
+        // 将ImageData上传到目标纹理
+        targetTexture.uploadData(imageData.data);
+        
+        // 清理临时canvas
+        canvas.remove();
     }
 }
 

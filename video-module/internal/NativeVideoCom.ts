@@ -102,6 +102,7 @@ export class NativeVideoCom extends VideoCom {
         console.log(`[video]画布宽度: ${cc.winSize.width}, 画布高度: ${cc.winSize.height}`);
         this.videoTransform.width = cc.winSize.width;
         this.videoTransform.height = cc.winSize.height;
+
         this.mediaVideo.node.active = true;
         this.mVideoPlayer.node.active = true;
         this.isInited = true;
