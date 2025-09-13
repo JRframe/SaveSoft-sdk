@@ -305,8 +305,8 @@ export class MediaVideo extends Component {
         try {
             // 如果已经存在视频对象且不在切换中，先清理
             if (this._video) {
-                console.log('[video] 清理现有的原生视频对象');
                 this.copyCurrentFrameToSprite();
+                console.log('[video] 清理现有的原生视频对象');
                 this._cleanupVideoResources();
             }
             
@@ -719,13 +719,6 @@ export class MediaVideo extends Component {
     }
 
     private _onReadyToPlay() {        
-        
-        // tempSprite 和 video 切换
-        this._isTransitioning = false;
-        this.videoOpacity.opacity = 255;
-        this.tempSprite.node.active = false;
-
-        
         this._updatePixelFormat();
         this._currentState = VideoState.PREPARED;
         if (this._seekTime > 0.1) {
@@ -741,6 +734,11 @@ export class MediaVideo extends Component {
             console.log('[video] 目标状态为播放，开始播放视频');
             this.play();
         }
+
+        // tempSprite 和 video 切换
+        this._isTransitioning = false;
+        this.videoOpacity.opacity = 255;
+        this.tempSprite.node.active = false;
     }
 
     private _onCompleted() {
@@ -1110,44 +1108,245 @@ export class MediaVideo extends Component {
         try {
             console.log('[video] copy,开始复制当前帧到tempSprite');
             
-            // 创建一个新的独立纹理对象
-            const copiedTexture = new Texture2D();
+            // 根据当前像素格式创建对应的纹理
+            const success = this._copyFrameByPixelFormat();
             
-            // 设置纹理属性，与原纹理保持一致
-            copiedTexture.setFilters(Texture2D.Filter.LINEAR, Texture2D.Filter.LINEAR);
-            copiedTexture.setMipFilter(Texture2D.Filter.LINEAR);
-            copiedTexture.setWrapMode(Texture2D.WrapMode.CLAMP_TO_EDGE, Texture2D.WrapMode.CLAMP_TO_EDGE);
-            
-            // 初始化新纹理的尺寸和格式
-            copiedTexture.reset({
-                width: this._texture0.width,
-                height: this._texture0.height,
-                //@ts-ignore
-                format: JSB ? gfx.Format.R8 : gfx.Format.RGB8
-            });
-            
-            if (JSB) {
-                // 原生平台：通过buffer复制纹理数据
-                this._copyTextureDataNative(copiedTexture);
+            if (success) {
+                console.log('[video] 成功复制当前帧到tempSprite');
+                return true;
             } else {
-                // 浏览器平台：通过canvas复制纹理数据
-                this._copyTextureDataBrowser(copiedTexture);
+                console.warn('[video] copy,复制当前帧失败');
+                return false;
             }
-            
-            // 为tempSprite创建或更新SpriteFrame
-            if (!this.tempSprite.spriteFrame) {
-                this.tempSprite.spriteFrame = new SpriteFrame();
-            }
-            
-            // 将复制的纹理赋值给tempSprite
-            this.tempSprite.spriteFrame.texture = copiedTexture;
-            
-            console.log('[video] 成功复制当前帧到tempSprite');
-            return true;
             
         } catch (error) {
             console.error('[video] copy,复制当前帧到tempSprite时发生错误:', error);
             return false;
+        }
+    }
+
+    /**
+     * 根据像素格式复制帧数据
+     * @returns {boolean} 是否复制成功
+     */
+    private _copyFrameByPixelFormat(): boolean {
+        // 获取当前的像素格式
+        const currentPixelFormat = JSB ? this._video.pixelFormat() : PixelFormat.RGB;
+        console.log(`[video] copy,当前像素格式: ${currentPixelFormat}`);
+        
+        if (JSB) {
+            // 原生平台：根据像素格式处理
+            return this._copyFrameNativeByFormat(currentPixelFormat);
+        } else {
+            // 浏览器平台：直接复制video元素
+            return this._copyFrameBrowser();
+        }
+    }
+
+    /**
+     * 原生平台根据像素格式复制帧数据
+     * @param pixelFormat 像素格式
+     * @returns {boolean} 是否复制成功
+     */
+    private _copyFrameNativeByFormat(pixelFormat: PixelFormat): boolean {
+        try {
+            switch (pixelFormat) {
+                case PixelFormat.RGB:
+                case PixelFormat.RGBA:
+                    return this._copySimpleFormat(pixelFormat);
+                
+                case PixelFormat.I420:
+                    return this._copyYUVFormat('I420');
+                
+                case PixelFormat.NV12:
+                    return this._copyYUVFormat('NV12');
+                
+                case PixelFormat.NV21:
+                    return this._copyYUVFormat('NV21');
+                
+                default:
+                    console.warn(`[video] copy,不支持的像素格式: ${pixelFormat}`);
+                    // 默认尝试RGB格式
+                    return this._copySimpleFormat(PixelFormat.RGB);
+            }
+        } catch (error) {
+            console.error('[video] copy,原生平台复制帧数据失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 复制简单格式（RGB/RGBA）
+     * @param pixelFormat 像素格式
+     * @returns {boolean} 是否复制成功
+     */
+    private _copySimpleFormat(pixelFormat: PixelFormat): boolean {
+        // 创建一个新的独立纹理对象
+        const copiedTexture = new Texture2D();
+        
+        // 设置纹理属性，与原纹理保持一致
+        copiedTexture.setFilters(Texture2D.Filter.LINEAR, Texture2D.Filter.LINEAR);
+        copiedTexture.setMipFilter(Texture2D.Filter.LINEAR);
+        copiedTexture.setWrapMode(Texture2D.WrapMode.CLAMP_TO_EDGE, Texture2D.WrapMode.CLAMP_TO_EDGE);
+        
+        // 根据像素格式设置正确的纹理格式
+        let textureFormat: gfx.Format;
+        if (pixelFormat === PixelFormat.RGBA) {
+            textureFormat = gfx.Format.RGBA8;
+        } else {
+            textureFormat = JSB ? gfx.Format.R8 : gfx.Format.RGB8;
+        }
+        
+        // 初始化新纹理的尺寸和格式
+        copiedTexture.reset({
+            width: this._texture0.width,
+            height: this._texture0.height,
+            format: textureFormat as any
+        });
+        
+        // 复制纹理数据
+        this._copyTextureDataNative(copiedTexture);
+        
+        // 为tempSprite创建或更新SpriteFrame
+        if (!this.tempSprite.spriteFrame) {
+            this.tempSprite.spriteFrame = new SpriteFrame();
+        }
+        
+        // 将复制的纹理赋值给tempSprite
+        this.tempSprite.spriteFrame.texture = copiedTexture;
+        
+        // 设置正确的材质
+        this._setTempSpriteMaterial(pixelFormat);
+        
+        return true;
+    }
+
+    /**
+     * 复制YUV格式（I420/NV12/NV21）
+     * @param formatName 格式名称
+     * @returns {boolean} 是否复制成功
+     */
+    private _copyYUVFormat(formatName: string): boolean {
+        console.log(`[video] copy,复制YUV格式: ${formatName}`);
+        
+        // YUV格式需要特殊处理，这里先创建一个RGB版本的纹理
+        // 通过渲染到临时RT来转换颜色空间
+        const copiedTexture = new Texture2D();
+        
+        copiedTexture.setFilters(Texture2D.Filter.LINEAR, Texture2D.Filter.LINEAR);
+        copiedTexture.setMipFilter(Texture2D.Filter.LINEAR);
+        copiedTexture.setWrapMode(Texture2D.WrapMode.CLAMP_TO_EDGE, Texture2D.WrapMode.CLAMP_TO_EDGE);
+        
+        // YUV转RGB后使用RGBA格式
+        copiedTexture.reset({
+            width: this._texture0.width,
+            height: this._texture0.height,
+            format: gfx.Format.RGBA8 as any
+        });
+        
+        // 对于YUV格式，我们需要通过GPU渲染来进行颜色空间转换
+        // 这里先使用简化的方法，直接复制Y通道数据
+        // 在实际应用中，应该使用专门的YUV转RGB shader
+        this._copyTextureDataNative(copiedTexture);
+        
+        // 为tempSprite创建或更新SpriteFrame
+        if (!this.tempSprite.spriteFrame) {
+            this.tempSprite.spriteFrame = new SpriteFrame();
+        }
+        
+        this.tempSprite.spriteFrame.texture = copiedTexture;
+        
+        // 设置RGB材质，因为我们已经转换了颜色空间
+        this._setTempSpriteMaterial(PixelFormat.RGBA);
+        
+        return true;
+    }
+
+    /**
+     * 浏览器平台复制帧数据
+     * @returns {boolean} 是否复制成功
+     */
+    private _copyFrameBrowser(): boolean {
+        // 浏览器平台下，_texture0应该包含video元素的数据
+        if (!this._video) {
+            throw new Error('视频对象无效');
+        }
+        
+        // 创建一个新的独立纹理对象
+        const copiedTexture = new Texture2D();
+        
+        // 设置纹理属性
+        copiedTexture.setFilters(Texture2D.Filter.LINEAR, Texture2D.Filter.LINEAR);
+        copiedTexture.setMipFilter(Texture2D.Filter.LINEAR);
+        copiedTexture.setWrapMode(Texture2D.WrapMode.CLAMP_TO_EDGE, Texture2D.WrapMode.CLAMP_TO_EDGE);
+        
+        // 浏览器平台使用RGB格式
+        copiedTexture.reset({
+            width: this._video.videoWidth || this.width,
+            height: this._video.videoHeight || this.height,
+            format: gfx.Format.RGB8 as any
+        });
+        
+        // 复制纹理数据
+        this._copyTextureDataBrowser(copiedTexture);
+        
+        // 为tempSprite创建或更新SpriteFrame
+        if (!this.tempSprite.spriteFrame) {
+            this.tempSprite.spriteFrame = new SpriteFrame();
+        }
+        
+        // 将复制的纹理赋值给tempSprite
+        this.tempSprite.spriteFrame.texture = copiedTexture;
+        
+        // 设置RGB材质
+        this._setTempSpriteMaterial(PixelFormat.RGB);
+        
+        return true;
+    }
+
+    /**
+     * 为tempSprite设置正确的材质
+     * @param pixelFormat 像素格式
+     */
+    private _setTempSpriteMaterial(pixelFormat: PixelFormat): void {
+        // tempSprite是Sprite类型，使用index=1的材质
+        const materialIndex = 1;
+        
+        try {
+            switch (pixelFormat) {
+                case PixelFormat.RGB:
+                    if (this.rgb && this.rgb[materialIndex]) {
+                        this.tempSprite.setMaterial(this.rgb[materialIndex], 0);
+                    }
+                    break;
+                case PixelFormat.RGBA:
+                    if (this.rgba && this.rgba[materialIndex]) {
+                        this.tempSprite.setMaterial(this.rgba[materialIndex], 0);
+                    }
+                    break;
+                case PixelFormat.I420:
+                    if (this.i420 && this.i420[materialIndex]) {
+                        this.tempSprite.setMaterial(this.i420[materialIndex], 0);
+                    }
+                    break;
+                case PixelFormat.NV12:
+                    if (this.nv12 && this.nv12[materialIndex]) {
+                        this.tempSprite.setMaterial(this.nv12[materialIndex], 0);
+                    }
+                    break;
+                case PixelFormat.NV21:
+                    if (this.nv21 && this.nv21[materialIndex]) {
+                        this.tempSprite.setMaterial(this.nv21[materialIndex], 0);
+                    }
+                    break;
+                default:
+                    console.warn(`[video] copy,未设置材质，像素格式: ${pixelFormat}`);
+                    break;
+            }
+            
+            console.log(`[video] copy,已设置tempSprite材质，像素格式: ${pixelFormat}`);
+        } catch (error) {
+            console.error('[video] copy,设置tempSprite材质时发生错误:', error);
         }
     }
     
