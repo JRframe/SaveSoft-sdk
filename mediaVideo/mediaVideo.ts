@@ -1132,6 +1132,10 @@ export class MediaVideo extends Component {
     private _copyFrameByPixelFormat(): boolean {
         // 获取当前的像素格式
         const currentPixelFormat = JSB ? this._video.pixelFormat() : PixelFormat.RGB;
+        if (currentPixelFormat == PixelFormat.NONE || currentPixelFormat == PixelFormat.I420) {
+            console.warn(`[video] copy,当前像素格式:${currentPixelFormat}，不复制图像`);
+            return false;
+        }
         console.log(`[video] copy,当前像素格式: ${currentPixelFormat}`);
         
         if (JSB) {
