@@ -87,6 +87,7 @@ export class SdkManager extends Component {
     }
 
     public event(key:string, param: object | string){
+        console.log(`[sdk] event, key: ${key}`);
         //this.mEventSDK?.event(key, param);
         GameDot.Instance.Dot(param);
     }
