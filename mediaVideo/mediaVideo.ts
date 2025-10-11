@@ -19,7 +19,6 @@ import { UITransform } from 'cc';
 import { UIOpacity } from 'cc';
 import { _decorator, Component, VideoClip, RenderableComponent, Texture2D, loader, EventHandler, game, Game, CCString, Material, Sprite, SpriteFrame, gfx, director, VideoPlayer, screen } from 'cc';
 import { JSB } from 'cc/env';
-import { error } from 'console';
 const { ccclass, property} = _decorator;
 export enum EventType {     //事件类型
     PREPARING = 1,      //准备中
@@ -547,19 +546,11 @@ export class MediaVideo extends Component {
                 return;
             }
             
-            // 检查视频元素是否仍然有效
-            if (!this._video || this._video.readyState === undefined || this._video.readyState < ReadyState.HAVE_METADATA) {
-                return;
-            }
-            
             try {
-                // 在上传前再次检查纹理有效性和切换状态
+                // 在上传前再次检查纹理有效性
                 if (this._texture0 && this._texture0.isValid && !this._isTransitioning) {
-                    // 添加额外的安全检查
-                    if (this._video.videoWidth > 0 && this._video.videoHeight > 0) {
-                        this._texture0.uploadData(this._video);
-                        this._updateMaterial();
-                    }
+                    this._texture0.uploadData(this._video);
+                    this._updateMaterial();
                 }
             } catch (error) {
                 console.error('[video] update时纹理上传发生错误:', error);
@@ -706,51 +697,19 @@ export class MediaVideo extends Component {
             return;
         }
         
-        // 检查尺寸参数的有效性
-        if (width <= 0 || height <= 0) {
-            console.warn(`[video] 纹理尺寸无效: ${width}x${height}，跳过重置`);
-            return;
-        }
-        
-        // 检查尺寸是否过大（防止内存问题）
-        const maxDimension = 8192; // 最大纹理尺寸
-        if (width > maxDimension || height > maxDimension) {
-            console.warn(`[video] 纹理尺寸过大: ${width}x${height}，限制为${maxDimension}x${maxDimension}`);
-            width = Math.min(width, maxDimension);
-            height = Math.min(height, maxDimension);
-        }
-        
         try {
             texture.setFilters(Texture2D.Filter.LINEAR, Texture2D.Filter.LINEAR);
             texture.setMipFilter(Texture2D.Filter.LINEAR);
             texture.setWrapMode(Texture2D.WrapMode.CLAMP_TO_EDGE, Texture2D.WrapMode.CLAMP_TO_EDGE);
             
-            // 设置合适的纹理格式
-            let textureFormat = format;
-            if (!textureFormat) {
-                textureFormat = JSB ? gfx.Format.R8 : gfx.Format.RGB8;
-            }
-            
+
             texture.reset({
                 width: width,
                 height: height,
-                format: textureFormat as any
+                format: format ? format : JSB ? gfx.Format.R8 : gfx.Format.RGB8
             });
-            
-            console.log(`[video] 纹理重置成功: ${width}x${height}, 格式: ${textureFormat}`);
         } catch (error) {
             console.error('[video] 重置纹理时发生错误:', error);
-            // 尝试使用默认格式重新设置
-            try {
-                texture.reset({
-                    width: Math.min(width, 1024),
-                    height: Math.min(height, 1024),
-                    format: gfx.Format.RGB8 as any
-                });
-                console.log('[video] 使用默认格式重新设置纹理成功');
-            } catch (fallbackError) {
-                console.error('[video] 使用默认格式重新设置纹理也失败:', fallbackError);
-            }
         }
     }
 
@@ -844,52 +803,20 @@ export class MediaVideo extends Component {
             return;
         }
         
-        // 检查原生视频对象状态
-        if (!this._video || typeof this._video.getDatas !== 'function') {
-            console.warn('[video] 原生视频对象状态异常，跳过帧更新');
-            return;
-        }
-        
         try {
             let datas: any = this._video.getDatas();
             if (!datas || !datas.length) return;
 
-            // 验证数据有效性
-            for (let i = 0; i < datas.length; i++) {
-                if (!datas[i] || !(datas[i] instanceof Uint8Array || datas[i] instanceof Int8Array || 
-                    datas[i] instanceof Uint16Array || datas[i] instanceof Int16Array ||
-                    datas[i] instanceof Uint32Array || datas[i] instanceof Int32Array ||
-                    datas[i] instanceof Float32Array || datas[i] instanceof Float64Array)) {
-                    console.warn(`[video] 帧数据${i}无效，跳过`);
-                    continue;
-                }
-            }
-
             // 安全地上传纹理数据，添加错误处理
-            // 在每次上传前都检查切换状态和纹理有效性
+            // 在每次上传前都检查切换状态
             if (datas.length > 0 && this._texture0 && this._texture0.isValid && !this._isTransitioning) {
-                try {
-                    this._texture0.uploadData(datas[0]);
-                } catch (error) {
-                    console.error('[video] 上传texture0失败:', error);
-                    return; // 如果第一个纹理上传失败，直接返回，避免后续操作
-                }
+                this._texture0.uploadData(datas[0]);
             }
-            
             if (datas.length > 1 && this._texture1 && this._texture1.isValid && !this._isTransitioning) {
-                try {
-                    this._texture1.uploadData(datas[1]);
-                } catch (error) {
-                    console.error('[video] 上传texture1失败:', error);
-                }
+                this._texture1.uploadData(datas[1]);
             }
-            
             if (datas.length > 2 && this._texture2 && this._texture2.isValid && !this._isTransitioning) {
-                try {
-                    this._texture2.uploadData(datas[2]);
-                } catch (error) {
-                    console.error('[video] 上传texture2失败:', error);
-                }
+                this._texture2.uploadData(datas[2]);
             }
             
             // 只有在非切换状态下才更新材质
@@ -997,27 +924,21 @@ export class MediaVideo extends Component {
      * 停止视频
      */
     public stop() {
-        console.log(`[video] 停止视频, 当前状态: ${this._currentState}`);
-        try
-        {
-            this._seekTime = 0;
-            if (this._isInPlaybackState() && this._currentState != VideoState.STOP) {
-                if (JSB) {
-                    this._video.stop();
-                } else {
-                    this._video.pause();
-                    this._video.currentTime = 0;
-                }
-    
-                this.node.emit('stopped', this);
-                this._currentState = VideoState.STOP;
-                this._targetState = VideoState.STOP;
-                EventHandler.emitEvents(this.videoPlayerEvent, this, EventType.STOPPED);
+        this._seekTime = 0;
+        if (this._isInPlaybackState() && this._currentState != VideoState.STOP) {
+            if (JSB) {
+                this._video.stop();
             } else {
-                this._targetState = VideoState.STOP;
+                this._video.pause();
+                this._video.currentTime = 0;
             }
-        } catch (error) {
-            console.error('[video] 停止视频时发生错误:', error);
+
+            this.node.emit('stopped', this);
+            this._currentState = VideoState.STOP;
+            this._targetState = VideoState.STOP;
+            EventHandler.emitEvents(this.videoPlayerEvent, this, EventType.STOPPED);
+        } else {
+            this._targetState = VideoState.STOP;
         }
     }
 
@@ -1084,12 +1005,6 @@ export class MediaVideo extends Component {
     public setRemoteSource(source: string) {
         console.log(`[video] setRemoteSource: ${source}, 当前源: ${this.source}, 当前状态: ${this._currentState}`);
         
-        // 参数验证
-        if (!source || typeof source !== 'string') {
-            console.error('[video] setRemoteSource: 无效的视频源');
-            return;
-        }
-        
         const currentSource = this.source; 
         
         // 如果源相同且正在播放，则无需重新设置
@@ -1099,34 +1014,15 @@ export class MediaVideo extends Component {
             return;
         }
         
-        // 设置切换状态，防止在切换过程中进行纹理操作
-        this._isTransitioning = true;
-        
-        try {
-            // 同步设置VideoPlayer的remoteURL（如果存在）
-            if (this.VideoView) {
-                this.VideoView.remoteURL = source;
-            }
-            
-            this.clip = null!;
-            this.source = source; // 使用setter方法进行赋值
-            
-            // 延迟执行视频源更新，确保状态设置完成
-            this.scheduleOnce(() => {
-                try {
-                    this._updateVideoSource();
-                } catch (error) {
-                    console.error('[video] 更新视频源时发生错误:', error);
-                    // 重置切换状态
-                    this._isTransitioning = false;
-                }
-            }, 0.1); // 延迟0.1秒执行
-            
-        } catch (error) {
-            console.error('[video] setRemoteSource执行失败:', error);
-            // 重置切换状态
-            this._isTransitioning = false;
+        // 同步设置VideoPlayer的remoteURL（如果存在）
+        if (this.VideoView) {
+            this.VideoView.remoteURL = source;
         }
+        
+        this.clip = null!;
+        this.source = source; // 使用setter方法进行赋值
+        
+        this._updateVideoSource();
     }
 
 
@@ -1468,16 +1364,6 @@ export class MediaVideo extends Component {
             throw new Error('director.root 或 device 不可用');
         }
         
-        // 检查目标纹理是否有效
-        if (!targetTexture || !targetTexture.isValid) {
-            throw new Error('目标纹理无效');
-        }
-        
-        // 检查源纹理是否有效
-        if (!this._texture0 || !this._texture0.isValid) {
-            throw new Error('源纹理无效');
-        }
-        
         const device = director.root.device;
         const sourceTexture = this._texture0.getGFXTexture();
         
@@ -1485,23 +1371,8 @@ export class MediaVideo extends Component {
             throw new Error('源纹理的GFX纹理对象无效');
         }
         
-        // 检查纹理尺寸是否合理
-        if (sourceTexture.width <= 0 || sourceTexture.height <= 0) {
-            throw new Error('源纹理尺寸无效');
-        }
-        
-        // 检查纹理大小是否合理（防止过大的纹理导致内存问题）
-        const maxTextureSize = 4096; // 最大纹理尺寸限制
-        if (sourceTexture.width > maxTextureSize || sourceTexture.height > maxTextureSize) {
-            throw new Error(`纹理尺寸过大: ${sourceTexture.width}x${sourceTexture.height}`);
-        }
-        
         // 创建临时buffer来存储纹理数据
         const textureSize = sourceTexture.size;
-        if (textureSize <= 0 || textureSize > 100 * 1024 * 1024) { // 100MB限制
-            throw new Error(`纹理大小异常: ${textureSize}`);
-        }
-        
         const tempBuffer = new Uint8Array(textureSize);
         
         // 设置复制区域
@@ -1511,21 +1382,11 @@ export class MediaVideo extends Component {
         copyRegion.texSubres.mipLevel = 0;
         copyRegion.texSubres.baseArrayLayer = 0;
         
-        try {
-            // 从源纹理读取数据到buffer
-            device.copyTextureToBuffers(sourceTexture, [tempBuffer], [copyRegion]);
-            
-            // 再次检查目标纹理有效性（防止在复制过程中被销毁）
-            if (targetTexture && targetTexture.isValid) {
-                // 将buffer数据上传到目标纹理
-                targetTexture.uploadData(tempBuffer);
-            } else {
-                console.warn('[video] 目标纹理在复制过程中变为无效状态');
-            }
-        } catch (error) {
-            console.error('[video] 纹理数据复制失败:', error);
-            throw error;
-        }
+        // 从源纹理读取数据到buffer
+        device.copyTextureToBuffers(sourceTexture, [tempBuffer], [copyRegion]);
+        
+        // 将buffer数据上传到目标纹理
+        targetTexture.uploadData(tempBuffer);
     }
     
     /**
@@ -1561,67 +1422,6 @@ export class MediaVideo extends Component {
         
         // 清理临时canvas
         canvas.remove();
-    }
-
-    /**
-     * 验证视频播放器状态是否安全
-     * @returns {boolean} 是否安全
-     */
-    private _isVideoStateSafe(): boolean {
-        // 检查基本组件
-        if (!this.node || !this.node.isValid) {
-            console.warn('[video] 节点无效');
-            return false;
-        }
-        
-        // 检查切换状态
-        if (this._isTransitioning) {
-            console.warn('[video] 正在切换视频');
-            return false;
-        }
-        
-        // 检查视频对象
-        if (!this._video) {
-            console.warn('[video] 视频对象不存在');
-            return false;
-        }
-        
-        // 检查纹理对象
-        if (!this._texture0 || !this._texture0.isValid) {
-            console.warn('[video] 主纹理无效');
-            return false;
-        }
-        
-        // 检查当前状态
-        if (this._currentState === VideoState.IDLE || 
-            this._currentState === VideoState.ERROR ||
-            this._currentState === VideoState.PREPARING) {
-            console.warn(`[video] 当前状态不允许操作: ${this._currentState}`);
-            return false;
-        }
-        
-        return true;
-    }
-    
-    /**
-     * 安全地执行纹理操作
-     * @param operation 操作函数
-     * @returns {boolean} 是否成功
-     */
-    private _safeTextureOperation(operation: () => void): boolean {
-        if (!this._isVideoStateSafe()) {
-            return false;
-        }
-        
-        try {
-            operation();
-            return true;
-        } catch (error) {
-            console.error('[video] 纹理操作失败:', error);
-            // 标记错误状态
-            this._currentState = VideoState.ERROR;
-            return false;
-        }
     }
 }
 
