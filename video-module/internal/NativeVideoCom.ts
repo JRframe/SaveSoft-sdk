@@ -94,6 +94,12 @@ export class NativeVideoCom extends VideoCom {
                 console.log('[video] 视频播放出错');
                 this.uiOpacity.opacity = 0;
                 break;
+            case EventType.COMPLETED:
+                console.log('[video] 视频播放完成');
+                this.uiOpacity.opacity = 0;
+                UIMainVideoComp.getInstance().fadeoutVideo();
+                UIMainVideoComp.getInstance().Close();
+                break;
         }
     }
 
