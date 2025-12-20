@@ -775,12 +775,11 @@ export class MediaVideo extends Component {
             console.log('[video] 目标状态为播放，开始播放视频');
             this.play();
         }
-    }
 
-    public setTempSpriteActive(active: boolean) {
-        this.tempSprite.node.active = active;
-        this.videoOpacity.opacity = active ? 0 : 255;
-        this._isTransitioning = active;
+        // tempSprite 和 video 切换
+        this._isTransitioning = false;
+        this.videoOpacity.opacity = 255;
+        this.tempSprite.node.active = false;
     }
 
     private _onCompleted() {
@@ -1207,7 +1206,8 @@ export class MediaVideo extends Component {
         const transform = this.tempSprite.node.getComponent(UITransform)!;
         transform.width = cc.winSize.width;
         transform.height = cc.winSize.height;
-        this.setTempSpriteActive(true);
+        this.tempSprite.node.active = true;
+        this._isTransitioning = true;
 
         try {
             console.log('[video] copy,开始复制当前帧到tempSprite');
