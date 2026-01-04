@@ -107,34 +107,42 @@ export class ATRewardRuntime extends Component {
     //Callbacks
     onRewardedVideoAdLoaded (placementId:any) {
         printLog("onRewardedVideoAdLoaded", placementId, "", "")
+         console.error("广告进行预加载，多准备几个视频，等用户需要看视频的时候，直接播放");
     }
 
     onRewardedVideoAdFailed (placementId:any, errorInfo:any) {
         printLog("onRewardedVideoAdFailed", placementId, "", errorInfo)
+         console.error("广告进行预加载，失败了，准备失败");
     }
 
     onRewardedVideoAdPlayStart  (placementId:any, callbackInfo:any) {
         printLog("onRewardedVideoAdPlayStart", placementId, callbackInfo, "")
+        console.error("广告开始播放");
     }
 
     onRewardedVideoAdPlayEnd  (placementId:any, callbackInfo:any) {
         printLog("onRewardedVideoAdPlayEnd", placementId, callbackInfo, "")
+        console.error("广告全都的看完了");
     }
 
     onRewardedVideoAdPlayFailed (placementId:any, errorInfo:any, callbackInfo:any) {
         printLog("onRewardedVideoAdPlayFailed", placementId, callbackInfo, errorInfo)
+        console.error("广告请求播放，播放失败");
     }
 
     onRewardedVideoAdClosed (placementId:any, callbackInfo:any) {
         printLog("onRewardedVideoAdClosed", placementId, callbackInfo, "")
+         console.error("广告被关闭");
     }
 
     onRewardedVideoAdPlayClicked  (placementId:any, callbackInfo:any) {
         printLog("onRewardedVideoAdPlayClicked", placementId, callbackInfo, "")
+        console.error("广告 中再次点击广告，就算直接看完了");
     }
 
     onReward (placementId:any, callbackInfo:any) {
-        printLog("onReward", placementId, callbackInfo, "")
+        printLog("onReward", placementId, callbackInfo, "");
+        console.error("广告 已经满足领奖条件了");
     }
     //Callbacks added v5.8.10
     onAdSourceBiddingAttempt (placementId:any, callbackInfo:any) {
