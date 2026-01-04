@@ -708,6 +708,11 @@ export class MediaVideo extends Component {
             console.warn('[video] 纹理对象为空，跳过重置');
             return;
         }
+        // 检查下当前的纹理尺寸是否和width,height一致
+        if (texture.width == width && texture.height == height) {
+            console.log(`[video] 纹理尺寸一致，跳过重置: ${width}x${height}`);
+            return;
+        }
         
         // 检查尺寸参数的有效性
         if (width <= 0 || height <= 0) {
