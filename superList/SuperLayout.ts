@@ -1060,6 +1060,12 @@ export class SuperLayout extends Component {
                     }
                 }
             }
+            // 新增：数量增加时也刷新所有item
+            const dtCount = this.node.children.length - offset;
+            for (let i = 0; i < dtCount; i++) {
+                const child: any = this.node.children[i];
+                this.notifyRefreshItem(child);
+            }
         }
     }
     /** 创建Item */
@@ -1390,6 +1396,9 @@ export class SuperLayout extends Component {
     }
     /** 通知给定的node刷新数据 */
     protected notifyRefreshItem(target: Node) {
+        if(!target.isValid) {
+            return;
+        }
         EventHandler.emitEvents(this.refreshItemEvents, target, (target as any)['__index'])
     }
     /** 分帧加载 */
