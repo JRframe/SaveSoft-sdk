@@ -23,16 +23,6 @@ export enum AdEvent {
     AdOnReward = 'AdOnReward_AdEvent',
 }
 
-/** 观看广告领取的奖励枚举 */
-export enum WatchAdGetReward {
-    /** 为领取钥匙 */
-    Key = 'Key_WatchAdGetReward',
-    /** 为商店 */
-    Shop = 'Shop_WatchAdGetReward',
-    /** 为钱 */
-    Money = 'Money_WatchAdGetReward',
-}
-
 /**
  * 广告相关管理器
  */
@@ -46,10 +36,10 @@ export class AdManager {
         return this.instance;
     }
 
-    private _watchAdResult: WatchAdGetReward = WatchAdGetReward.Key;
-    private _bindingData : any = null;
     private _canGetReward: boolean = false;
 
+    private _SuccessGetReward: () => void = () => {};
+    private _FailGetReward: () => void = () => {};
     private placementID() {
         if (cc.sys.os === cc.sys.OS.IOS) {
             return 'b5b44a0f115321';
@@ -76,12 +66,15 @@ export class AdManager {
     }
 
     private onRewardedVideoAdPlayEnd(placementId: any, callbackInfo: any) {
-        console.error('广告全都的看完了,能领奖励：'+this._canGetReward);
+        console.error('广告全都的看完了,能领奖励：' + this._canGetReward);
         oops.message.dispatchEvent(AdEvent.AdPlayEnd);
         if (this._canGetReward) {
-            oops.message.dispatchEvent(AdEvent.AdOnReward, this._watchAdResult,this._bindingData);
+            if (this._SuccessGetReward) {
+                this._SuccessGetReward();
+            }
+        } else {
+            if (this._FailGetReward) this._FailGetReward();
         }
-        this._bindingData = null;
         this._canGetReward = false;
     }
 
@@ -201,9 +194,9 @@ export class AdManager {
         console.error('loadAD', this.placementID(), '', '');
     }
 
-    public showAd(watchAd: WatchAdGetReward, bindingData: any = null) {
-        this._watchAdResult = watchAd;
-        this._bindingData = bindingData;
+    public showAd(successGetRewardCb: () => void, failGetRewardCb: () => void = null!) {
+        this._SuccessGetReward = successGetRewardCb;
+        this._FailGetReward = failGetRewardCb;
         oops.message.dispatchEvent(AdEvent.PlayAd);
         ATRewardedVideoSDK.showAdInScenario(this.placementID(), 'f5e54970dc84e6');
         console.error('广告 请求播放一个广告，先有个全屏遮罩，2秒后自动关闭或者监听 广告开始播放事件也可以关闭 showAd');
