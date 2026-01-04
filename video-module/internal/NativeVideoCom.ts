@@ -89,7 +89,6 @@ export class NativeVideoCom extends VideoCom {
                     this.uiOpacity.opacity = 255;
                     UIMainVideoComp.getInstance().fadeinVideo();
                 }
-                this.mediaVideo.setTempSpriteActive(false);
                 break;
             case EventType.ERROR:
                 console.log('[video] 视频播放出错');

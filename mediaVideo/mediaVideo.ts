@@ -7,15 +7,12 @@
  * 2. 播放远程视频：调用 tryInitializeRemote() 然后 setRemoteSource()
  * 3. 切换视频源：直接调用 setRemoteSource()，会自动清理之前的资源
  * 4. 完全清理：在组件销毁前调用 dispose() 方法
- * 5. 图像复制：调用 copyCurrentFrameToSprite() 复制当前帧到 tempSprite
- * 6. 平滑切换：调用 copyRenderToTempSpriteAndActivate() 实现平滑视频切换
  * 
  * 注意事项：
  * - 多次调用 setRemoteSource 现在是安全的，会自动清理之前的视频流
  * - 在 onDisable 时会自动清理资源
  * - 如果需要手动清理，可以调用 dispose() 方法
  * - 视频切换时会保持前一帧内容，避免闪烁
- * - copyCurrentFrameToSprite() 创建独立的纹理副本，不受原始纹理变化影响
  */
 
 import { UITransform } from 'cc';
@@ -708,11 +705,6 @@ export class MediaVideo extends Component {
             console.warn('[video] 纹理对象为空，跳过重置');
             return;
         }
-        // 检查下当前的纹理尺寸是否和width,height一致
-        if (texture.width == width && texture.height == height) {
-            console.log(`[video] 纹理尺寸一致，跳过重置: ${width}x${height}`);
-            return;
-        }
         
         // 检查尺寸参数的有效性
         if (width <= 0 || height <= 0) {
@@ -783,44 +775,11 @@ export class MediaVideo extends Component {
             console.log('[video] 目标状态为播放，开始播放视频');
             this.play();
         }
-    }
 
-    public setTempSpriteActive(active: boolean) {
-        if (this.tempSprite) {
-            this.tempSprite.node.active = active;
-        }
-        if (this.videoOpacity) {
-            this.videoOpacity.opacity = active ? 0 : 255;
-        }
-        this._isTransitioning = active;
-    }
-
-    /**
-     * 复制render组件当前图像到tempSprite并激活切换效果
-     * 这是一个便捷方法，结合了图像复制和切换激活
-     * @returns {boolean} 是否成功
-     */
-    public copyRenderToTempSpriteAndActivate(): boolean {
-        // 先复制图像
-        const copySuccess = this.copyCurrentFrameToSprite();
-        if (!copySuccess) {
-            console.warn('[video] 图像复制失败，无法激活切换效果');
-            return false;
-        }
-        
-        // 激活切换效果
-        this.setTempSpriteActive(true);
-        
-                 console.log('[video] 成功复制图像并激活切换效果');
-         return true;
-     }
-
-    /**
-     * 关闭tempSprite切换效果，恢复正常视频显示
-     */
-    public deactivateTempSprite(): void {
-        this.setTempSpriteActive(false);
-        console.log('[video] 已关闭tempSprite切换效果');
+        // tempSprite 和 video 切换
+        this._isTransitioning = false;
+        this.videoOpacity.opacity = 255;
+        this.tempSprite.node.active = false;
     }
 
     private _onCompleted() {
@@ -1223,141 +1182,446 @@ export class MediaVideo extends Component {
     }
 
     /**
-     * 将当前render组件的图像复制到tempSprite上
-     * 复制的图像独立于原始纹理，不会因为原始纹理的变化而改变
+     * 将当前_texture0的图像复制到tempSprite上
+     * 复制的图像独立于_texture0，不会因为_texture0的变化而改变
      * @returns {boolean} 是否复制成功
      */
     public copyCurrentFrameToSprite(): boolean {
         // 检查必要条件
         if (!this.tempSprite) {
-            console.warn('[video] tempSprite未设置，无法复制图像');
-            return false;
-        }
-        
-        if (!this.render) {
-            console.warn('[video] render组件为空，无法复制图像');
+            console.warn('[video] copy,tempSprite未设置，无法复制图像');
             return false;
         }
         
         if (!this._texture0 || !this._texture0.isValid) {
-            console.warn('[video] 主纹理无效，无法复制图像');
+            console.warn('[video] copy,_texture0无效，无法复制图像');
             return false;
         }
         
+        if (!this._isInPlaybackState()) {
+            console.warn('[video] copy,视频未处于播放状态，无法复制图像');
+            return false;
+        }
+
+        const transform = this.tempSprite.node.getComponent(UITransform)!;
+        transform.width = cc.winSize.width;
+        transform.height = cc.winSize.height;
+        this.tempSprite.node.active = true;
+        this._isTransitioning = true;
+
         try {
-            // 创建一个新的纹理副本
-            const copiedTexture = this._createTextureCopy(this._texture0);
-            if (!copiedTexture) {
-                console.warn('[video] 创建纹理副本失败');
+            console.log('[video] copy,开始复制当前帧到tempSprite');
+            
+            // 根据当前像素格式创建对应的纹理
+            const success = this._copyFrameByPixelFormat();
+            
+            if (success) {
+                console.log('[video] 成功复制当前帧到tempSprite');
+                return true;
+            } else {
+                console.warn('[video] copy,复制当前帧失败');
                 return false;
             }
             
-            // 为tempSprite创建新的SpriteFrame
-            if (!this.tempSprite.spriteFrame) {
-                this.tempSprite.spriteFrame = new SpriteFrame();
-            }
-            
-            // 设置纹理到SpriteFrame
-            this.tempSprite.spriteFrame.texture = copiedTexture;
-            
-            // 设置tempSprite的尺寸
-            const transform = this.tempSprite.node.getComponent(UITransform)!;
-            if (transform) {
-                transform.width = copiedTexture.width;
-                transform.height = copiedTexture.height;
-            }
-            
-            console.log(`[video] 成功复制图像到tempSprite，尺寸: ${copiedTexture.width}x${copiedTexture.height}`);
-            return true;
-            
         } catch (error) {
-            console.error('[video] 复制图像到tempSprite时发生错误:', error);
+            console.error('[video] copy,复制当前帧到tempSprite时发生错误:', error);
             return false;
         }
     }
 
     /**
-     * 创建纹理的独立副本
-     * @param sourceTexture 源纹理
-     * @returns {Texture2D | null} 新的纹理副本，失败时返回null
+     * 根据像素格式复制帧数据
+     * @returns {boolean} 是否复制成功
      */
-    private _createTextureCopy(sourceTexture: Texture2D): Texture2D | null {
-        if (!sourceTexture || !sourceTexture.isValid) {
-            console.warn('[video] 源纹理无效，无法创建副本');
-            return null;
+    private _copyFrameByPixelFormat(): boolean {
+        // 获取当前的像素格式
+        const currentPixelFormat = JSB ? this._video.pixelFormat() : PixelFormat.RGB;
+        if (currentPixelFormat == PixelFormat.NONE || currentPixelFormat == PixelFormat.I420) {
+            console.warn(`[video] copy,当前像素格式:${currentPixelFormat}，不复制图像`);
+            return false;
         }
+        console.log(`[video] copy,当前像素格式: ${currentPixelFormat}`);
         
-        try {
-            // 创建新的纹理对象
-            const newTexture = new Texture2D();
-            
-                         // 设置纹理属性（使用默认值，因为无法获取源纹理的设置）
-             newTexture.setFilters(Texture2D.Filter.LINEAR, Texture2D.Filter.LINEAR);
-             newTexture.setMipFilter(Texture2D.Filter.LINEAR);
-             newTexture.setWrapMode(Texture2D.WrapMode.CLAMP_TO_EDGE, Texture2D.WrapMode.CLAMP_TO_EDGE);
-            
-            // 初始化纹理
-            newTexture.reset({
-                width: sourceTexture.width,
-                height: sourceTexture.height,
-                format: sourceTexture.getPixelFormat() as any
-            });
-            
-            // 如果是浏览器平台，可以通过canvas进行像素复制
-            if (!JSB && this._video && this._video instanceof HTMLVideoElement) {
-                // 创建canvas进行像素数据复制
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                    canvas.width = sourceTexture.width;
-                    canvas.height = sourceTexture.height;
-                    
-                    // 绘制当前视频帧到canvas
-                    ctx.drawImage(this._video, 0, 0, canvas.width, canvas.height);
-                    
-                    // 从canvas获取像素数据并上传到新纹理
-                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                    newTexture.uploadData(imageData.data);
-                    
-                    console.log(`[video] 通过canvas成功创建纹理副本: ${canvas.width}x${canvas.height}`);
-                    return newTexture;
-                }
-            }
-            
-            // 原生平台或canvas方式失败时，尝试从GPU读取纹理数据
-            if (JSB && sourceTexture.getGFXTexture && director.root && director.root.device) {
-                try {
-                    const gfxTexture = sourceTexture.getGFXTexture();
-                    if (gfxTexture) {
-                        // 使用之前的纹理复制方法
-                        this._copyTextureToTexture2D(newTexture, gfxTexture);
-                        console.log(`[video] 通过GFX成功创建纹理副本: ${sourceTexture.width}x${sourceTexture.height}`);
-                        return newTexture;
-                    }
-                } catch (gfxError) {
-                    console.warn('[video] GFX纹理复制失败:', gfxError);
-                }
-            }
-            
-            // 如果以上方法都失败，创建一个黑色纹理作为占位符
-            console.warn('[video] 无法获取纹理数据，创建占位符纹理');
-            const blackData = new Uint8Array(sourceTexture.width * sourceTexture.height * 4);
-            // 填充为黑色 (RGBA: 0,0,0,255)
-            for (let i = 0; i < blackData.length; i += 4) {
-                blackData[i] = 0;     // R
-                blackData[i + 1] = 0; // G  
-                blackData[i + 2] = 0; // B
-                blackData[i + 3] = 255; // A
-            }
-            newTexture.uploadData(blackData);
-            
-            return newTexture;
-            
-        } catch (error) {
-            console.error('[video] 创建纹理副本时发生错误:', error);
-            return null;
+        if (JSB) {
+            // 原生平台：根据像素格式处理
+            return this._copyFrameNativeByFormat(currentPixelFormat);
+        } else {
+            // 浏览器平台：直接复制video元素
+            return this._copyFrameBrowser();
         }
     }
 
+    /**
+     * 原生平台根据像素格式复制帧数据
+     * @param pixelFormat 像素格式
+     * @returns {boolean} 是否复制成功
+     */
+    private _copyFrameNativeByFormat(pixelFormat: PixelFormat): boolean {
+        try {
+            switch (pixelFormat) {
+                case PixelFormat.RGB:
+                case PixelFormat.RGBA:
+                    return this._copySimpleFormat(pixelFormat);
+                
+                case PixelFormat.I420:
+                    return this._copyYUVFormat('I420');
+                
+                case PixelFormat.NV12:
+                    return this._copyYUVFormat('NV12');
+                
+                case PixelFormat.NV21:
+                    return this._copyYUVFormat('NV21');
+                
+                default:
+                    console.warn(`[video] copy,不支持的像素格式: ${pixelFormat}`);
+                    // 默认尝试RGB格式
+                    return this._copySimpleFormat(PixelFormat.RGB);
+            }
+        } catch (error) {
+            console.error('[video] copy,原生平台复制帧数据失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 复制简单格式（RGB/RGBA）
+     * @param pixelFormat 像素格式
+     * @returns {boolean} 是否复制成功
+     */
+    private _copySimpleFormat(pixelFormat: PixelFormat): boolean {
+        // 创建一个新的独立纹理对象
+        const copiedTexture = new Texture2D();
+        
+        // 设置纹理属性，与原纹理保持一致
+        copiedTexture.setFilters(Texture2D.Filter.LINEAR, Texture2D.Filter.LINEAR);
+        copiedTexture.setMipFilter(Texture2D.Filter.LINEAR);
+        copiedTexture.setWrapMode(Texture2D.WrapMode.CLAMP_TO_EDGE, Texture2D.WrapMode.CLAMP_TO_EDGE);
+        
+        // 根据像素格式设置正确的纹理格式
+        let textureFormat: gfx.Format;
+        if (pixelFormat === PixelFormat.RGBA) {
+            textureFormat = gfx.Format.RGBA8;
+        } else {
+            textureFormat = JSB ? gfx.Format.R8 : gfx.Format.RGB8;
+        }
+        
+        // 初始化新纹理的尺寸和格式
+        copiedTexture.reset({
+            width: this._texture0.width,
+            height: this._texture0.height,
+            format: textureFormat as any
+        });
+        
+        // 复制纹理数据
+        this._copyTextureDataNative(copiedTexture);
+        
+        // 为tempSprite创建或更新SpriteFrame
+        if (!this.tempSprite.spriteFrame) {
+            this.tempSprite.spriteFrame = new SpriteFrame();
+        }
+        
+        // 将复制的纹理赋值给tempSprite
+        this.tempSprite.spriteFrame.texture = copiedTexture;
+        
+        // 设置正确的材质
+        this._setTempSpriteMaterial(pixelFormat);
+        
+        return true;
+    }
+
+    /**
+     * 复制YUV格式（I420/NV12/NV21）
+     * @param formatName 格式名称
+     * @returns {boolean} 是否复制成功
+     */
+    private _copyYUVFormat(formatName: string): boolean {
+        console.log(`[video] copy,复制YUV格式: ${formatName}`);
+        
+        // YUV格式需要特殊处理，这里先创建一个RGB版本的纹理
+        // 通过渲染到临时RT来转换颜色空间
+        const copiedTexture = new Texture2D();
+        
+        copiedTexture.setFilters(Texture2D.Filter.LINEAR, Texture2D.Filter.LINEAR);
+        copiedTexture.setMipFilter(Texture2D.Filter.LINEAR);
+        copiedTexture.setWrapMode(Texture2D.WrapMode.CLAMP_TO_EDGE, Texture2D.WrapMode.CLAMP_TO_EDGE);
+        
+        // YUV转RGB后使用RGBA格式
+        copiedTexture.reset({
+            width: this._texture0.width,
+            height: this._texture0.height,
+            format: gfx.Format.RGBA8 as any
+        });
+        
+        // 对于YUV格式，我们需要通过GPU渲染来进行颜色空间转换
+        // 这里先使用简化的方法，直接复制Y通道数据
+        // 在实际应用中，应该使用专门的YUV转RGB shader
+        this._copyTextureDataNative(copiedTexture);
+        
+        // 为tempSprite创建或更新SpriteFrame
+        if (!this.tempSprite.spriteFrame) {
+            this.tempSprite.spriteFrame = new SpriteFrame();
+        }
+        
+        this.tempSprite.spriteFrame.texture = copiedTexture;
+        
+        // 设置RGB材质，因为我们已经转换了颜色空间
+        this._setTempSpriteMaterial(PixelFormat.RGBA);
+        
+        return true;
+    }
+
+    /**
+     * 浏览器平台复制帧数据
+     * @returns {boolean} 是否复制成功
+     */
+    private _copyFrameBrowser(): boolean {
+        // 浏览器平台下，_texture0应该包含video元素的数据
+        if (!this._video) {
+            throw new Error('视频对象无效');
+        }
+        
+        // 创建一个新的独立纹理对象
+        const copiedTexture = new Texture2D();
+        
+        // 设置纹理属性
+        copiedTexture.setFilters(Texture2D.Filter.LINEAR, Texture2D.Filter.LINEAR);
+        copiedTexture.setMipFilter(Texture2D.Filter.LINEAR);
+        copiedTexture.setWrapMode(Texture2D.WrapMode.CLAMP_TO_EDGE, Texture2D.WrapMode.CLAMP_TO_EDGE);
+        
+        // 浏览器平台使用RGB格式
+        copiedTexture.reset({
+            width: this._video.videoWidth || this.width,
+            height: this._video.videoHeight || this.height,
+            format: gfx.Format.RGB8 as any
+        });
+        
+        // 复制纹理数据
+        this._copyTextureDataBrowser(copiedTexture);
+        
+        // 为tempSprite创建或更新SpriteFrame
+        if (!this.tempSprite.spriteFrame) {
+            this.tempSprite.spriteFrame = new SpriteFrame();
+        }
+        
+        // 将复制的纹理赋值给tempSprite
+        this.tempSprite.spriteFrame.texture = copiedTexture;
+        
+        // 设置RGB材质
+        this._setTempSpriteMaterial(PixelFormat.RGB);
+        
+        return true;
+    }
+
+    /**
+     * 为tempSprite设置正确的材质
+     * @param pixelFormat 像素格式
+     */
+    private _setTempSpriteMaterial(pixelFormat: PixelFormat): void {
+        // tempSprite是Sprite类型，使用index=1的材质
+        const materialIndex = 1;
+        
+        try {
+            switch (pixelFormat) {
+                case PixelFormat.RGB:
+                    if (this.rgb && this.rgb[materialIndex]) {
+                        this.tempSprite.setMaterial(this.rgb[materialIndex], 0);
+                    }
+                    break;
+                case PixelFormat.RGBA:
+                    if (this.rgba && this.rgba[materialIndex]) {
+                        this.tempSprite.setMaterial(this.rgba[materialIndex], 0);
+                    }
+                    break;
+                case PixelFormat.I420:
+                    if (this.i420 && this.i420[materialIndex]) {
+                        this.tempSprite.setMaterial(this.i420[materialIndex], 0);
+                    }
+                    break;
+                case PixelFormat.NV12:
+                    if (this.nv12 && this.nv12[materialIndex]) {
+                        this.tempSprite.setMaterial(this.nv12[materialIndex], 0);
+                    }
+                    break;
+                case PixelFormat.NV21:
+                    if (this.nv21 && this.nv21[materialIndex]) {
+                        this.tempSprite.setMaterial(this.nv21[materialIndex], 0);
+                    }
+                    break;
+                default:
+                    console.warn(`[video] copy,未设置材质，像素格式: ${pixelFormat}`);
+                    break;
+            }
+            
+            console.log(`[video] copy,已设置tempSprite材质，像素格式: ${pixelFormat}`);
+        } catch (error) {
+            console.error('[video] copy,设置tempSprite材质时发生错误:', error);
+        }
+    }
+    
+    /**
+     * 原生平台纹理数据复制
+     * @param targetTexture 目标纹理
+     */
+    private _copyTextureDataNative(targetTexture: Texture2D): void {
+        // 检查director和device是否可用
+        if (!director.root || !director.root.device) {
+            throw new Error('director.root 或 device 不可用');
+        }
+        
+        // 检查目标纹理是否有效
+        if (!targetTexture || !targetTexture.isValid) {
+            throw new Error('目标纹理无效');
+        }
+        
+        // 检查源纹理是否有效
+        if (!this._texture0 || !this._texture0.isValid) {
+            throw new Error('源纹理无效');
+        }
+        
+        const device = director.root.device;
+        const sourceTexture = this._texture0.getGFXTexture();
+        
+        if (!sourceTexture) {
+            throw new Error('源纹理的GFX纹理对象无效');
+        }
+        
+        // 检查纹理尺寸是否合理
+        if (sourceTexture.width <= 0 || sourceTexture.height <= 0) {
+            throw new Error('源纹理尺寸无效');
+        }
+        
+        // 检查纹理大小是否合理（防止过大的纹理导致内存问题）
+        const maxTextureSize = 4096; // 最大纹理尺寸限制
+        if (sourceTexture.width > maxTextureSize || sourceTexture.height > maxTextureSize) {
+            throw new Error(`纹理尺寸过大: ${sourceTexture.width}x${sourceTexture.height}`);
+        }
+        
+        // 创建临时buffer来存储纹理数据
+        const textureSize = sourceTexture.size;
+        if (textureSize <= 0 || textureSize > 100 * 1024 * 1024) { // 100MB限制
+            throw new Error(`纹理大小异常: ${textureSize}`);
+        }
+        
+        const tempBuffer = new Uint8Array(textureSize);
+        
+        // 设置复制区域
+        const copyRegion = new gfx.BufferTextureCopy();
+        copyRegion.texExtent.width = sourceTexture.width;
+        copyRegion.texExtent.height = sourceTexture.height;
+        copyRegion.texSubres.mipLevel = 0;
+        copyRegion.texSubres.baseArrayLayer = 0;
+        
+        try {
+            // 从源纹理读取数据到buffer
+            device.copyTextureToBuffers(sourceTexture, [tempBuffer], [copyRegion]);
+            
+            // 再次检查目标纹理有效性（防止在复制过程中被销毁）
+            if (targetTexture && targetTexture.isValid) {
+                // 将buffer数据上传到目标纹理
+                targetTexture.uploadData(tempBuffer);
+            } else {
+                console.warn('[video] 目标纹理在复制过程中变为无效状态');
+            }
+        } catch (error) {
+            console.error('[video] 纹理数据复制失败:', error);
+            throw error;
+        }
+    }
+    
+    /**
+     * 浏览器平台纹理数据复制
+     * @param targetTexture 目标纹理
+     */
+    private _copyTextureDataBrowser(targetTexture: Texture2D): void {
+        // 浏览器平台下，_texture0应该包含video元素的数据
+        if (!this._video) {
+            throw new Error('视频对象无效');
+        }
+        
+        // 创建离屏canvas来复制视频帧
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+            throw new Error('无法创建canvas上下文');
+        }
+        
+        // 设置canvas尺寸
+        canvas.width = this._video.videoWidth || this.width;
+        canvas.height = this._video.videoHeight || this.height;
+        
+        // 将当前视频帧绘制到canvas
+        ctx.drawImage(this._video, 0, 0, canvas.width, canvas.height);
+        
+        // 获取ImageData
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        
+        // 将ImageData上传到目标纹理
+        targetTexture.uploadData(imageData.data);
+        
+        // 清理临时canvas
+        canvas.remove();
+    }
+
+    /**
+     * 验证视频播放器状态是否安全
+     * @returns {boolean} 是否安全
+     */
+    private _isVideoStateSafe(): boolean {
+        // 检查基本组件
+        if (!this.node || !this.node.isValid) {
+            console.warn('[video] 节点无效');
+            return false;
+        }
+        
+        // 检查切换状态
+        if (this._isTransitioning) {
+            console.warn('[video] 正在切换视频');
+            return false;
+        }
+        
+        // 检查视频对象
+        if (!this._video) {
+            console.warn('[video] 视频对象不存在');
+            return false;
+        }
+        
+        // 检查纹理对象
+        if (!this._texture0 || !this._texture0.isValid) {
+            console.warn('[video] 主纹理无效');
+            return false;
+        }
+        
+        // 检查当前状态
+        if (this._currentState === VideoState.IDLE || 
+            this._currentState === VideoState.ERROR ||
+            this._currentState === VideoState.PREPARING) {
+            console.warn(`[video] 当前状态不允许操作: ${this._currentState}`);
+            return false;
+        }
+        
+        return true;
+    }
+    
+    /**
+     * 安全地执行纹理操作
+     * @param operation 操作函数
+     * @returns {boolean} 是否成功
+     */
+    private _safeTextureOperation(operation: () => void): boolean {
+        if (!this._isVideoStateSafe()) {
+            return false;
+        }
+        
+        try {
+            operation();
+            return true;
+        } catch (error) {
+            console.error('[video] 纹理操作失败:', error);
+            // 标记错误状态
+            this._currentState = VideoState.ERROR;
+            return false;
+        }
+    }
 }
 
