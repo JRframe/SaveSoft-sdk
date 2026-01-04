@@ -1396,9 +1396,6 @@ export class SuperLayout extends Component {
     }
     /** 通知给定的node刷新数据 */
     protected notifyRefreshItem(target: Node) {
-        if(!target.isValid) {
-            return;
-        }
         EventHandler.emitEvents(this.refreshItemEvents, target, (target as any)['__index'])
     }
     /** 分帧加载 */

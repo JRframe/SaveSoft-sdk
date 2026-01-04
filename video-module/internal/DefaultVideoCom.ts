@@ -10,6 +10,7 @@ import { Vec3 } from 'cc';
 import { view } from 'cc';
 import { oops } from '../../../../../extensions/oops-plugin-framework/assets/core/Oops';
 import { VideoClip } from 'cc';
+import { UIMainVideoComp } from '../../../game/UIMainVideo/UIMainVideoComp';
 const { ccclass, property } = _decorator;
 
 @ccclass('DefaultVideoCom')
@@ -26,6 +27,7 @@ export class DefaultVideoCom extends VideoCom {
         this.mVideoPlayer.node.on(VideoPlayer.EventType.READY_TO_PLAY, this.onReadyToPlay, this);
         this.mVideoPlayer.node.on(VideoPlayer.EventType.STOPPED, this.onStopped, this);
         this.mVideoPlayer.node.on(VideoPlayer.EventType.COMPLETED, this.onCompleted, this);
+        this.mVideoPlayer.node.on(VideoPlayer.EventType.PLAYING, this.onPlaying, this);
 
         const VideoWidth = oops.gui.root.w;
         const VideoHeight = oops.gui.root.h;
@@ -88,6 +90,11 @@ export class DefaultVideoCom extends VideoCom {
         this.mVideoPlayer.play();
         //let scaleRate = height / VideoHeight;
         //this.videoSprite.node.scale = new Vec3(scaleRate,scaleRate,scaleRate);
+    }
+
+    onPlaying(){
+        console.log("[video] DefaultVideoCom 开始播放了");
+        UIMainVideoComp.getInstance().onVideoPlayStart(this.mParam);
     }
 
     onStopped(): void {
